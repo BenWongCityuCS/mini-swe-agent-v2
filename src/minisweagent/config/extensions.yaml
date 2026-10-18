@@ -44,6 +44,47 @@ agent:
     todo: true
     edit: true
     todo_persist: true
+    # Read attaches images/videos as native model input.
+    read_media: true
+    max_image_bytes: 5000000
+    max_video_bytes: 20000000
+    video_content_type: video_url
+    media_detail: auto
+
+  # Background bash commands and subagents (TaskOutput / TaskStop).
+  background:
+    enabled: true
+    max_tasks: 16
+    max_output_chars: 200000
+    default_timeout: 0
+    kill_on_close: true
+
+  # Agent-to-agent messages (SendMessage).
+  bus:
+    enabled: true
+    max_inbox: 50
+
+  # Full conversation persistence and --resume.
+  session:
+    enabled: true
+    dir: "~/.mini-swe-agent/sessions"
+    autosave: true
+    keep_media: true
+    max_sessions: 0
+
+  # Event hooks. Auto-discovers .mini-swe-agent/hooks.yaml and
+  # ~/.mini-swe-agent/hooks.yaml. A hook is a shell command that receives JSON
+  # on stdin; exit code 2 blocks a PreToolUse action.
+  hooks:
+    enabled: true
+    auto_discover: true
+    # PreToolUse:
+    #   - matcher: "bash|Write|Edit"
+    #     command: "python .mini-swe-agent/guard.py"
+    #     timeout: 30
+    # PostToolUse:
+    #   - matcher: "*"
+    #     command: "python .mini-swe-agent/audit.py"
 
   skills:
     enabled: true

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import fnmatch
 import glob as glob_module
 import os
@@ -17,6 +18,22 @@ _MAX_GLOB_RESULTS = 2_000
 _MAX_FILE_BYTES = 2_000_000
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
 
+_MEDIA_TYPES = {
+    ".png": ("image", "image/png"),
+    ".jpg": ("image", "image/jpeg"),
+    ".jpeg": ("image", "image/jpeg"),
+    ".gif": ("image", "image/gif"),
+    ".webp": ("image", "image/webp"),
+    ".bmp": ("image", "image/bmp"),
+    ".svg": ("image", "image/svg+xml"),
+    ".mp4": ("video", "video/mp4"),
+    ".m4v": ("video", "video/mp4"),
+    ".mov": ("video", "video/quicktime"),
+    ".webm": ("video", "video/webm"),
+    ".ogv": ("video", "video/ogg"),
+    ".avi": ("video", "video/x-msvideo"),
+}
+
 
 def _resolve_path(value: str, workspace: Path) -> Path:
     path = Path(value).expanduser()
@@ -25,7 +42,15 @@ def _resolve_path(value: str, workspace: Path) -> Path:
     return path.resolve()
 
 
-def _read_handler(workspace: Path, tracker=None):
+def _read_handler(
+    workspace: Path,
+    tracker=None,
+    *,
+    read_media: bool = False,
+    max_image_bytes: int = 5_000_000,
+    max_video_bytes: int = 20_000_000,
+    media_detail: str = "auto",
+):
     def handler(args: dict) -> dict:
         raw = args.get("file_path") or args.get("path")
         if not raw:
@@ -33,6 +58,42 @@ def _read_handler(workspace: Path, tracker=None):
         path = _resolve_path(str(raw), workspace)
         if not path.is_file():
             return err(f"File not found: {path}")
+
+        media = _MEDIA_TYPES.get(path.suffix.lower())
+        if media is not None:
+            kind, mime = media
+            if not read_media:
+                return err(
+                    f"{path} is {kind} data. Enable agent.tools.read_media to attach it to the model, "
+                    "or describe it with the Vision tool."
+                )
+            limit = max_image_bytes if kind == "image" else max_video_bytes
+            try:
+                data = path.read_bytes()
+            except OSError as exc:
+                return err(f"Could not read {path}: {exc}")
+            if len(data) > limit:
+                return err(
+                    f"{path} is {len(data):,} bytes, over the {limit:,}-byte limit for {kind} input. "
+                    "Downscale or increase agent.tools.max_image_bytes/max_video_bytes."
+                )
+            data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            attachment = {
+                "path": str(path),
+                "kind": kind,
+                "mime": mime,
+                "bytes": len(data),
+                "data_url": data_url,
+            }
+            if kind == "image" and media_detail:
+                attachment["detail"] = media_detail
+            return ok(
+                f'<file path="{path}" type="{kind}" mime="{mime}" bytes="{len(data)}">\n'
+                f"The {kind} is attached to the next user message as native model input.\n"
+                "</file>",
+                extra={"attachments": [attachment]},
+            )
+
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -145,11 +206,23 @@ def _glob_handler(workspace: Path):
     return handler
 
 
-def build_read_only_tools(workspace: Path, tracker=None) -> list[Tool]:
+def build_read_only_tools(
+    workspace: Path,
+    tracker=None,
+    *,
+    read_media: bool = False,
+    max_image_bytes: int = 5_000_000,
+    max_video_bytes: int = 20_000_000,
+    media_detail: str = "auto",
+) -> list[Tool]:
     return [
         Tool(
             name="Read",
-            description="Read a text file with line numbers. Use offset/limit for large files.",
+            description=(
+                "Read a file. Text is returned with line numbers (use offset/limit for large files). "
+                "Images and videos are attached to the next message as native model input when "
+                "read_media is enabled."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -159,7 +232,14 @@ def build_read_only_tools(workspace: Path, tracker=None) -> list[Tool]:
                 },
                 "required": ["file_path"],
             },
-            handler=_read_handler(workspace, tracker),
+            handler=_read_handler(
+                workspace,
+                tracker,
+                read_media=read_media,
+                max_image_bytes=max_image_bytes,
+                max_video_bytes=max_video_bytes,
+                media_detail=media_detail,
+            ),
             read_only=True,
         ),
         Tool(

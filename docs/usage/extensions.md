@@ -1,4 +1,4 @@
-# Extensions: skills, subagents, tools, MCP, plugins, browser, vision, automation
+# Extensions: skills, subagents, tools, MCP, plugins, browser, vision, automation, sessions, hooks
 
 This fork adds an optional extension layer inspired by ZCode. Everything is
 **opt-in** and defaults to disabled, so a stock config behaves like upstream
@@ -17,14 +17,17 @@ models do not expose tool schemas and raise a clear error if extensions are enab
 
 | Tool | Purpose |
 | --- | --- |
-| `TodoWrite` | Persistent task list at `.mini-swe-agent/todos.json` |
-| `Read` | Read a file with line numbers |
+| `TodoWrite` / `TodoRead` | Persistent task list at `.mini-swe-agent/todos.json` |
+| `Read` | Read a file with line numbers; attach images/videos with `read_media` |
 | `Grep` | Regex search returning `path:line:text` |
 | `Glob` | List files by glob |
 | `Write` | Create/replace a file |
 | `Edit` | Exact string replacement |
 | `Skill` | Load a skill body on demand |
-| `Task` | Delegate to a subagent |
+| `Task` | Delegate to a subagent (sync or background) |
+| `TaskOutput` / `TaskStop` | Read or stop background commands and subagents |
+| `SendMessage` | Message another agent (`main` or a background subagent) |
+| `SessionRead` | Read a previous session transcript |
 | `Vision` | Ask a separate vision model about an image |
 | `Browser` | Drive Chrome/Edge via Kimi WebBridge |
 
@@ -40,7 +43,127 @@ agent:
     todo: true
     edit: true
     todo_persist: true
+    read_media: true  # Read attaches images/videos as native model input
+    max_image_bytes: 5000000
+    max_video_bytes: 20000000
 ```
+
+## Background tasks
+
+`background.enabled` adds `TaskOutput` and `TaskStop` and lets the built-in
+`bash` tool take `run_in_background: true`:
+
+```yaml
+agent:
+  background:
+    enabled: true
+    max_tasks: 16
+    max_output_chars: 200000
+    default_timeout: 0     # 0 = no timeout
+    kill_on_close: true
+```
+
+The model starts a command and keeps working:
+
+```json
+{"command": "pytest -q", "run_in_background": true}
+```
+
+It then polls with `TaskOutput(task_id="bg-...", wait=true, timeout=30)` and
+stops it with `TaskStop(task_id="bg-...")`. `TaskOutput` without `task_id` lists
+all tasks; pass the returned `next_offset` to read only new output.
+
+`Task(..., run_in_background: true)` does the same for a subagent. The result
+includes both a task id and an agent id, so the coordinator can read the final
+report with `TaskOutput` and steer the subagent with `SendMessage`.
+
+With `LocalEnvironment`, output streams while the command runs and `TaskStop`
+kills the whole process group. Other environments execute the blocking
+`env.execute` call in a worker thread: output appears when the command finishes
+and stopping is cooperative.
+
+## Session persistence and resume
+
+```yaml
+agent:
+  session:
+    enabled: true
+    dir: "~/.mini-swe-agent/sessions"
+    autosave: true
+    keep_media: true
+    max_sessions: 0
+```
+
+Every step writes a JSON session containing the messages, counters, compaction
+state, and todo list (the trajectory file is still written separately). CLI:
+
+```bash
+mini -c mini.yaml -c extensions.yaml --task "..."          # new session
+mini ... --resume 20261019-101500-ab12cd                   # by id
+mini ... --resume /path/to/session.json                    # by path
+mini ... --continue                                        # latest in this workspace
+mini ... --session-id my-fix                               # choose the id
+mini --list-sessions                                       # list and exit
+```
+
+Resuming appends a short "continue" user message and keeps the original system
+prompt, so the model sees the same context it had before. `SessionRead` lets a
+running agent inspect a previous transcript (text only; images are omitted).
+
+## Hooks
+
+Hooks are shell commands. They receive a JSON payload on stdin and run with the
+workspace as cwd:
+
+```yaml
+agent:
+  hooks:
+    enabled: true
+    auto_discover: true   # .mini-swe-agent/hooks.yaml + ~/.mini-swe-agent/hooks.yaml
+    PreToolUse:
+      - matcher: "bash|Write|Edit"   # glob(s), comma separated; * = all
+        command: "python .mini-swe-agent/guard.py"
+        timeout: 30
+    PostToolUse:
+      - matcher: "*"
+        command: "python .mini-swe-agent/audit.py"
+```
+
+Supported events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`,
+`SessionStart`, `SessionEnd`, `Stop`, `PreCompact`, `PostCompact`.
+
+Payload fields: `event`, `session_id`, `cwd`, and for tool events `tool_name`,
+`tool_input`, `tool_result`. Exit code **2 blocks** the action and returns stderr
+to the model. Other non-zero exits are logged but do not block; a timeout blocks
+unless the entry sets `fail_open: true`. Stdout is appended to the tool result
+(or injected as `<hook_context>` for session/prompt events). `${WORKSPACE}`,
+`${SESSION_ID}`, and `${TOOL_NAME}` are expanded in the command.
+
+## Agent messaging
+
+```yaml
+agent:
+  bus:
+    enabled: true
+    max_inbox: 50
+```
+
+`SendMessage(to="main", message="...")` reports to the coordinator;
+`SendMessage(to="sub-general-purpose-ab12cd", ...)` steers a background
+subagent. Messages are queued and injected as `<agent_message>` user messages
+before the recipient's next model call; the tool does not wait for a reply.
+
+## Reading images and videos
+
+With `tools.read_media: true`, `Read` detects common image and video extensions
+and sends the file as native model input in the next user message (base64 data
+URL). The tool result itself stays short, and token estimates ignore the binary
+payload. `max_image_bytes` / `max_video_bytes` guard against oversized files.
+
+Images use an `image_url` content part; videos use `video_url` by default. Set
+`tools.video_content_type: image_url` for providers that expect video in an
+image part. If the main model has no vision support, leave `read_media` off and
+use the `Vision` tool instead.
 
 ## Context sections and compaction
 
@@ -143,7 +266,14 @@ loaded only when the model calls `Skill`. `${SKILL_DIR}`, `${ZCODE_SKILL_DIR}`,
 ## Subagents
 
 A `Task` tool runs a nested agent with its own context, a filtered tool set, and
-the same workspace. Built-ins: `general-purpose` and `explore`.
+the same workspace. Built-ins: `general-purpose`, `explore`, `plan` (read-only
+implementation plan), and `visual-judge` (pass/fail verdicts for rendered images;
+needs `read_media` or `Vision`). A profile file with the same name overrides a
+built-in.
+
+Pass `run_in_background: true` to return a task id and agent id immediately. Use
+`TaskOutput` for the final report and `SendMessage` to steer the running subagent.
+Synchronous calls return a `<subagent_result ... agent_id="...">` block.
 
 ```markdown
 ---

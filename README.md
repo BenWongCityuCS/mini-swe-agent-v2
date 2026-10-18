@@ -24,11 +24,21 @@ loop — and adds the modern surface around it. Everything is opt-in, so the bar
 - One readable agent loop, bash, any LiteLLM-compatible model.
 - **Conversation compaction** — old history is summarized into a checkpoint
   instead of dying at the context limit (upstream PR #948).
+- **Sessions and resume** — every step is autosaved; `--resume <id>`,
+  `--continue`, and `--list-sessions` continue a run after a crash or a restart.
+- **Hooks** — shell commands around tool calls, prompts, sessions, and
+  compaction. Exit code 2 blocks a tool call, so guards are enforced by the
+  harness, not by the prompt.
+- **Background work** — `bash` and `Task` accept `run_in_background`, with
+  `TaskOutput` / `TaskStop` for polling and cancellation.
+- **Agent messaging** — `SendMessage` steers a running subagent or reports back
+  to the coordinator.
 
 **Delegation**
 
 - **Subagents** via a `Task` tool: Markdown profiles, isolated message history,
-  filtered tools, configurable depth.
+  filtered tools, configurable depth. Built-ins: `general-purpose`, `explore`,
+  `plan`, and `visual-judge`; sync or background execution.
 - **Model switching** per profile: `model: openai/...`, `model_class`, and
   `model_kwargs`. Omit it / use `inherit` to reuse the parent model.
 - **Reasoning effort from the payload** — `reasoning_effort` is resolved from the
@@ -38,8 +48,10 @@ loop — and adds the modern surface around it. Everything is opt-in, so the bar
 
 **Modern tools**
 
-- **TodoWrite** — a persistent task list (`.mini-swe-agent/todos.json`).
-- **Read / Grep / Glob** — structured file inspection.
+- **TodoWrite / TodoRead** — a persistent task list (`.mini-swe-agent/todos.json`).
+- **Read / Grep / Glob** — structured file inspection. `Read` can attach images
+  and videos as native model input (`read_media`), not just text.
+- **SessionRead** — inspect a previous session transcript from inside a run.
 - **Write / Edit with read-before-edit** — a file must be read in the current
   session and must not have changed on disk before it can be modified.
 - **Skill** — `SKILL.md` discovery, a compact index in the prompt, and on-demand

@@ -5,6 +5,7 @@ or https://minimal-agent.com for a tutorial on the basic building principles.
 import json
 import logging
 import os
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -26,14 +27,26 @@ from minisweagent.agents.compaction import (
     resolve_context_limit,
     summary_message,
 )
-from minisweagent.exceptions import ContextWindowExceeded, FormatError, InterruptAgentFlow, LimitsExceeded, TimeExceeded
+from minisweagent.agents.session import sanitize_messages
+from minisweagent.exceptions import (
+    Cancelled,
+    ContextWindowExceeded,
+    FormatError,
+    InterruptAgentFlow,
+    LimitsExceeded,
+    TimeExceeded,
+)
 from minisweagent.extensions.config import (
+    AgentBusConfig,
     AutomationsConfig,
+    BackgroundConfig,
     BrowserConfig,
     ContextConfig,
+    HooksConfig,
     McpConfig,
     PluginsConfig,
     PromptsConfig,
+    SessionConfig,
     SkillsConfig,
     SubagentsConfig,
     ToolsConfig,
@@ -84,6 +97,14 @@ class AgentConfig(BaseModel):
     """Kimi WebBridge browser control."""
     vision: VisionConfig = VisionConfig()
     """Separate vision model for images and screenshots."""
+    background: BackgroundConfig = BackgroundConfig()
+    """Run bash commands and subagents in the background."""
+    hooks: HooksConfig = HooksConfig()
+    """Shell hooks around tool calls, prompts, sessions, and compaction."""
+    session: SessionConfig = SessionConfig()
+    """Conversation persistence and resume."""
+    bus: AgentBusConfig = AgentBusConfig()
+    """Agent-to-agent messaging (SendMessage)."""
 
 
 class DefaultAgent:
@@ -95,12 +116,20 @@ class DefaultAgent:
         config_class: type = AgentConfig,
         tool_registry: ToolRegistry | None = None,
         prompt_sections: list[str] | None = None,
+        background_manager=None,
+        hook_runner=None,
+        agent_bus=None,
+        session_store=None,
+        agent_id: str | None = None,
+        cancel_event: threading.Event | None = None,
         **kwargs,
     ):
         """See the `AgentConfig` class for permitted keyword arguments.
 
         ``tool_registry``/``prompt_sections`` are used internally to build subagents
         with a pre-created extension set instead of starting a second MCP client.
+        The other keyword arguments let subagents share their parent's background
+        manager, hooks, message bus, and cancellation event.
         """
         self.config = config_class(**kwargs)
         self.messages: list[dict] = []
@@ -117,6 +146,17 @@ class DefaultAgent:
         if not isinstance(env_cwd, (str, os.PathLike)):
             env_cwd = None
         self._workspace = Path(self.config.workspace or env_cwd or os.getcwd()).expanduser().resolve()
+        self.agent_id = agent_id or os.getenv("MSWEA_AGENT_ID") or "main"
+        self._cancel_event = cancel_event or threading.Event()
+        self._background = background_manager
+        self._owns_background = background_manager is None
+        self._hooks = hook_runner
+        self._bus = agent_bus
+        self._session_store = session_store
+        self._session_id = self.config.session.id or ""
+        self._session_created_at = time.time()
+        self._resumed = False
+        self._task = ""
         self._tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._prompt_sections = list(prompt_sections or [])
         self._skills: dict = {}
@@ -151,6 +191,8 @@ class DefaultAgent:
             raise ValueError("agent.compaction.buffer and the requested output must be smaller than the context limit.")
         if tool_registry is None:
             self._setup_extensions()
+        if self._bus is not None:
+            self._bus.register(self.agent_id, kind="agent")
         self._start_time = time.time()
 
     def _setup_extensions(self) -> None:
@@ -225,19 +267,58 @@ class DefaultAgent:
             from minisweagent.extensions.tools import build_read_only_tools
 
             self._file_tracker = FileTracker()
-            self._tools.extend(build_read_only_tools(self._workspace, self._file_tracker))
+            self._tools.extend(
+                build_read_only_tools(
+                    self._workspace,
+                    self._file_tracker,
+                    read_media=self.config.tools.read_media,
+                    max_image_bytes=self.config.tools.max_image_bytes,
+                    max_video_bytes=self.config.tools.max_video_bytes,
+                    media_detail=self.config.tools.media_detail,
+                )
+            )
         if self.config.tools.edit:
             from minisweagent.extensions.edit_tools import build_edit_tools
 
             self._tools.extend(build_edit_tools(self._workspace, self._file_tracker))
         if self.config.tools.todo:
-            from minisweagent.extensions.todo import TodoStore, build_todo_tool
+            from minisweagent.extensions.todo import TodoStore, build_todo_read_tool, build_todo_tool
 
             self._todo = TodoStore(self._workspace, persist=self.config.tools.todo_persist)
             self._tools.add(build_todo_tool(self._todo))
+            self._tools.add(build_todo_read_tool(self._todo))
             self._prompt_sections.append(
                 "Track multi-step work with TodoWrite: pass the complete list, keep exactly one item "
-                "in_progress, and mark items completed as soon as they are done."
+                "in_progress, and mark items completed as soon as they are done. Use TodoRead to check it."
+            )
+
+        if self.config.session.enabled and self._session_store is None:
+            from minisweagent.agents.session import SessionStore, build_session_read_tool
+
+            self._session_store = SessionStore(self.config.session, self._workspace)
+            if not self._session_id:
+                self._session_id = self._session_store.new_id()
+            self._tools.add(build_session_read_tool(self._session_store))
+
+        if self.config.background.enabled and self._background is None:
+            from minisweagent.extensions.background import BackgroundTaskManager, build_background_tools
+
+            self._background = BackgroundTaskManager(self.config.background, str(self._workspace))
+            self._tools.extend(build_background_tools(self._background))
+
+        if self.config.bus.enabled and self._bus is None:
+            from minisweagent.extensions.agent_bus import AgentBus, build_send_message_tool
+
+            self._bus = AgentBus(self.config.bus)
+            self._tools.add(build_send_message_tool(self._bus, self.agent_id))
+
+        if self.config.hooks.enabled and self._hooks is None:
+            from minisweagent.extensions.hooks import build_hook_runner
+
+            self._hooks = build_hook_runner(
+                self.config.hooks,
+                self._workspace,
+                session_id=self._session_id or self.agent_id,
             )
 
         if self.config.vision.enabled:
@@ -299,12 +380,16 @@ class DefaultAgent:
         return "\n\n".join(part for part in parts if part)
 
     def close(self) -> None:
-        """Stop extension resources owned by this agent (browser session, MCP servers)."""
+        """Stop extension resources owned by this agent (browser, MCP, background tasks)."""
         if self._browser is not None:
             self._browser.close()
         if self._mcp is not None and self._owns_mcp:
             self._mcp.close()
             self._owns_mcp = False
+        if self._background is not None and self._owns_background:
+            self._background.close()
+        if self._bus is not None:
+            self._bus.unregister(self.agent_id)
 
     def get_template_vars(self, **kwargs) -> dict:
         return recursive_merge(
@@ -343,25 +428,43 @@ class DefaultAgent:
             )
         )
 
-    def run(self, task: str = "", **kwargs) -> dict:
-        """Run step() until agent is finished. Returns dictionary with exit_status, submission keys."""
+    def run(self, task: str = "", *, resume: str | None = None, **kwargs) -> dict:
+        """Run step() until agent is finished. Returns dictionary with exit_status, submission keys.
+
+        Pass ``resume`` (a session id, a path, or ``"latest"``) to continue a saved
+        conversation instead of starting from the task template.
+        """
         self.extra_template_vars |= {"task": task, **kwargs}
-        self.messages = []
-        self.compaction_state = CompactionState()
-        self._microcompacted = False
-        self._compaction_failures = 0
-        if self._context_builder is not None:
-            self._context_builder.base_prompt = self._render_template(self.config.system_template)
-            self._context_result = self._context_builder.build()
-        task_content = self._render_template(self.config.instance_template)
-        if self._context_result is not None and self._context_result.meta_user_content:
-            task_content = (
-                f"<meta_user>\n{self._context_result.meta_user_content}\n</meta_user>\n\n{task_content}"
+        self._task = task
+        if resume:
+            self._load_session(resume, task=task)
+        else:
+            self.messages = []
+            self.compaction_state = CompactionState()
+            self._microcompacted = False
+            self._compaction_failures = 0
+            self._resumed = False
+            if self.config.session.enabled and not self._session_id and self._session_store is not None:
+                self._session_id = self._session_store.new_id()
+            task_content = self._initial_task_content()
+            submit_hook = self._run_hook("UserPromptSubmit", extra={"prompt": task_content})
+            if submit_hook is not None:
+                if submit_hook.output:
+                    task_content += f"\n\n<hook_context>\n{submit_hook.output}\n</hook_context>"
+                if submit_hook.blocked:
+                    task_content += f"\n\n<hook_blocked>\n{submit_hook.message}\n</hook_blocked>"
+            self.add_messages(
+                self.model.format_message(role="system", content=self._system_content()),
+                self.model.format_message(role="user", content=task_content),
             )
-        self.add_messages(
-            self.model.format_message(role="system", content=self._system_content()),
-            self.model.format_message(role="user", content=task_content),
-        )
+        start_hook = self._run_hook("SessionStart", extra={"task": self._task, "resumed": self._resumed})
+        if start_hook is not None and start_hook.output:
+            self.add_messages(
+                self.model.format_message(
+                    role="user",
+                    content=f'<hook_context event="SessionStart">\n{start_hook.output}\n</hook_context>',
+                )
+            )
         try:
             while True:
                 try:
@@ -389,18 +492,112 @@ class DefaultAgent:
                     raise
                 finally:
                     self.save(self.config.output_path)
+                    self._save_session()
                 if self.messages[-1].get("role") == "exit":
                     break
         finally:
+            stop_hook = self._run_hook("Stop", extra={"status": self._status()})
+            if stop_hook is not None and stop_hook.output:
+                self.logger.info("Stop hook: %s", stop_hook.output)
+            self._save_session(force=True)
+            self._run_hook("SessionEnd", extra={"status": self._status()})
             self.close()
         return self.messages[-1].get("extra", {})
 
+    def _initial_task_content(self) -> str:
+        if self._context_builder is not None:
+            self._context_builder.base_prompt = self._render_template(self.config.system_template)
+            self._context_result = self._context_builder.build()
+        task_content = self._render_template(self.config.instance_template)
+        if self._context_result is not None and self._context_result.meta_user_content:
+            task_content = (
+                f"<meta_user>\n{self._context_result.meta_user_content}\n</meta_user>\n\n{task_content}"
+            )
+        return task_content
+
+    def _status(self) -> str:
+        if not self.messages:
+            return "running"
+        last = self.messages[-1]
+        if last.get("role") == "exit":
+            return str(last.get("extra", {}).get("exit_status") or "exit")
+        return "running"
+
+    def _load_session(self, spec: str, *, task: str = "") -> None:
+        from minisweagent.agents.session import SessionStore, compaction_state_from_dict
+
+        store = self._session_store
+        if store is None:
+            store = SessionStore(self.config.session, self._workspace)
+            self._session_store = store
+        data = store.load(spec)
+        messages = data.get("messages") or []
+        if not messages:
+            raise ValueError(f"Session {data.get('_path')} contains no messages")
+        self.messages = list(messages)
+        self.cost = float(data.get("cost") or 0.0)
+        self.n_calls = int(data.get("n_calls") or 0)
+        self.n_compaction_calls = int(data.get("compaction_calls") or 0)
+        self.compaction_state = compaction_state_from_dict(data.get("compaction"))
+        self._microcompacted = bool(data.get("microcompacted") or False)
+        self._compaction_failures = int(data.get("compaction_failures") or 0)
+        self._session_id = str(data.get("id") or Path(data["_path"]).stem)
+        self._session_created_at = float(data.get("created_at") or time.time())
+        self._task = str(data.get("task") or "")
+        self._resumed = True
+        if self._todo is not None and data.get("todos"):
+            self._todo.update(list(data["todos"]))
+        continuation = task or "[Session resumed. Continue from the last state; do not repeat completed work.]"
+        self._task = task or self._task
+        self.add_messages(self.model.format_message(role="user", content=continuation))
+
+    def _save_session(self, *, force: bool = False) -> None:
+        if self._session_store is None:
+            return
+        if not self.config.session.autosave and not force:
+            return
+        if not self._session_id:
+            self._session_id = self._session_store.new_id()
+        payload = {
+            "id": self._session_id,
+            "created_at": self._session_created_at,
+            "workspace": str(self._workspace),
+            "agent_id": self.agent_id,
+            "model": getattr(getattr(self.model, "config", None), "model_name", ""),
+            "task": self._task,
+            "status": self._status(),
+            "n_calls": self.n_calls,
+            "cost": self.cost,
+            "compaction_calls": self.n_compaction_calls,
+            "messages": sanitize_messages(
+                self.messages, keep_media=self.config.session.keep_media
+            ),
+            "compaction": self.compaction_state.serialize(),
+            "microcompacted": self._microcompacted,
+            "compaction_failures": self._compaction_failures,
+            "todos": (
+                [
+                    {"content": item.content, "status": item.status, "priority": item.priority}
+                    for item in self._todo.items
+                ]
+                if self._todo is not None
+                else []
+            ),
+        }
+        try:
+            self._session_store.save(payload)
+        except OSError:
+            self.logger.exception("could not save session %s", self._session_id)
+
     def step(self) -> list[dict]:
         """Query the LM, execute actions."""
+        self._check_cancelled()
         return self.execute_actions(self.query())
 
     def query(self) -> dict:
         """Query the model and return model messages. Override to add hooks."""
+        self._check_cancelled()
+        self._drain_inbox()
         self._check_limits()
         if self.config.compaction.enabled and self.config.compaction.auto:
             self._compact_until_fit("auto")
@@ -434,6 +631,51 @@ class DefaultAgent:
                     "extra": {"exit_status": "TimeExceeded", "submission": ""},
                 }
             )
+
+    def _check_cancelled(self) -> None:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise Cancelled(
+                {
+                    "role": "exit",
+                    "content": "Cancelled",
+                    "extra": {"exit_status": "Cancelled", "submission": ""},
+                }
+            )
+
+    def _drain_inbox(self) -> None:
+        if self._bus is None:
+            return
+        for entry in self._bus.drain(self.agent_id):
+            self.add_messages(self.model.format_message(role="user", content=entry.render()))
+
+    def _run_hook(self, event: str, **kwargs):
+        if self._hooks is None:
+            return None
+        return self._hooks.run(event, **kwargs)
+
+    def _attachment_messages(self, outputs: list[dict]) -> list[dict]:
+        messages: list[dict] = []
+        for output in outputs:
+            for attachment in (output.get("extra") or {}).get("attachments") or []:
+                kind = str(attachment.get("kind") or "")
+                data_url = str(attachment.get("data_url") or "")
+                if kind not in {"image", "video"} or not data_url:
+                    continue
+                if kind == "image":
+                    part = {"type": "image_url", "image_url": {"url": data_url}}
+                    if attachment.get("detail"):
+                        part["image_url"]["detail"] = attachment["detail"]
+                else:
+                    content_type = self.config.tools.video_content_type
+                    part = {"type": content_type, content_type: {"url": data_url}}
+                text = (
+                    f"Attached {kind}: {attachment.get('path', '')} "
+                    f"({attachment.get('mime', '')}, {int(attachment.get('bytes') or 0):,} bytes)"
+                )
+                messages.append(
+                    self.model.format_message(role="user", content=[{"type": "text", "text": text}, part])
+                )
+        return messages
 
     def _messages_for_model(self) -> list[dict]:
         if not self.compaction_state.summary:
@@ -488,6 +730,12 @@ class DefaultAgent:
         if boundary is None:
             return False
         before = estimate_tokens(self._messages_for_model())
+        pre = self._run_hook(
+            "PreCompact", extra={"reason": reason, "boundary": boundary, "tokens_before": before}
+        )
+        if pre is not None and pre.blocked:
+            self.logger.warning("PreCompact hook blocked compaction: %s", pre.message)
+            return False
         prompt = render_summary_prompt(
             template,
             self.compaction_state.summary,
@@ -521,6 +769,9 @@ class DefaultAgent:
                 estimated_tokens_after=after,
                 cost=cost,
             )
+        )
+        self._run_hook(
+            "PostCompact", extra={"reason": reason, "tokens_after": after, "cost": cost}
         )
         return True
 
@@ -603,13 +854,66 @@ class DefaultAgent:
                 outputs = list(pool.map(self._execute_action, actions))
         else:
             outputs = [self._execute_action(action) for action in actions]
-        return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
+        attachments = self._attachment_messages(outputs)
+        # Attachments are delivered as a user message; keep the base64 payload
+        # out of the tool observation (and therefore out of the trajectory).
+        clean_outputs = []
+        for output in outputs:
+            extra = output.get("extra") or {}
+            if "attachments" in extra:
+                output = {**output, "extra": {key: value for key, value in extra.items() if key != "attachments"}}
+            clean_outputs.append(output)
+        observations = self.model.format_observation_messages(
+            message, clean_outputs, self.get_template_vars()
+        )
+        self.add_messages(*observations)
+        if attachments:
+            self.add_messages(*attachments)
+        return [*observations, *attachments]
 
     def _execute_action(self, action: dict) -> dict:
-        tool_name = action.get("tool")
-        if tool_name is None or tool_name == "bash":
-            return self.env.execute(action)
-        return self._tools.call(str(tool_name), action.get("args") or {})
+        tool_name = str(action.get("tool") or "bash")
+        tool_input = action.get("args") if action.get("tool") else {"command": action.get("command", "")}
+        if isinstance(tool_input, dict) and action.get("run_in_background"):
+            tool_input = {**tool_input, "run_in_background": True}
+
+        pre = self._run_hook(
+            "PreToolUse", tool_name=tool_name, tool_input=tool_input
+        )
+        if pre is not None and pre.blocked:
+            return {
+                "output": "",
+                "returncode": -1,
+                "exception_info": f"Blocked by PreToolUse hook: {pre.message}",
+            }
+
+        if tool_name == "bash":
+            if action.get("run_in_background"):
+                if self._background is None:
+                    result = {
+                        "output": "",
+                        "returncode": -1,
+                        "exception_info": "Background tasks are disabled (agent.background.enabled).",
+                    }
+                else:
+                    result = self._background.start_command(
+                        str(action.get("command") or ""),
+                        self.env,
+                        timeout=action.get("timeout"),
+                        owner=self.agent_id,
+                    )
+            else:
+                result = self.env.execute(action)
+        else:
+            result = self._tools.call(tool_name, action.get("args") or {})
+
+        post = self._run_hook(
+            "PostToolUse", tool_name=tool_name, tool_input=tool_input, tool_result=result
+        )
+        if post is not None and post.output:
+            result = dict(result)
+            result["output"] = f"{result.get('output') or ''}\n[hook] {post.output}".strip()
+        return result
 
     def serialize(self, *extra_dicts) -> dict:
         """Serialize agent state to a json-compatible nested dictionary for saving."""
@@ -660,6 +964,17 @@ class DefaultAgent:
                     else []
                 ),
                 "automation_dirs": list(self._automation_dirs),
+                "background_tasks": self._background.serialize() if self._background is not None else [],
+                "agents": self._bus.serialize() if self._bus is not None else {},
+            },
+            "session": {
+                "id": self._session_id,
+                "resumed": self._resumed,
+                "path": (
+                    str(self._session_store.path_for(self._session_id))
+                    if self._session_store is not None and self._session_id
+                    else None
+                ),
             },
             "context": {
                 "enabled": self.config.context.enabled,

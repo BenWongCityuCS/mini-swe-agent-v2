@@ -22,6 +22,10 @@ class UserInterruption(InterruptAgentFlow):
     """Raised when the user interrupts the agent."""
 
 
+class Cancelled(InterruptAgentFlow):
+    """Raised when a background task or another agent stops this agent."""
+
+
 class FormatError(InterruptAgentFlow):
     """Raised when the LM's output is not in the expected format."""
 

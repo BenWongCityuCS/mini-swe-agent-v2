@@ -105,11 +105,19 @@ class ToolsConfig(BaseModel):
     read_only: bool = False
     """Register Read/Grep/Glob for the main agent as well."""
     todo: bool = False
-    """Register TodoWrite."""
+    """Register TodoWrite and TodoRead."""
     edit: bool = False
     """Register Write/Edit with read-before-edit enforcement."""
     todo_persist: bool = True
     """Persist the todo list under .mini-swe-agent/todos.json."""
+    read_media: bool = False
+    """Let Read attach images and videos to the model as native input."""
+    max_image_bytes: int = 5_000_000
+    max_video_bytes: int = 20_000_000
+    video_content_type: Literal["video_url", "image_url"] = "video_url"
+    """Content part used for video. Some providers expect ``image_url`` instead."""
+    media_detail: Literal["auto", "low", "high"] = "auto"
+    """Detail hint passed with images (OpenAI-style providers)."""
 
 
 class PluginsConfig(BaseModel):
@@ -172,6 +180,70 @@ class BrowserConfig(BaseModel):
     """Keep localhost/private IPs reachable when external networking is restricted."""
     browser_use: BrowserUseConfig = BrowserUseConfig()
     """Settings used when the browser-use backend is selected or used as a fallback."""
+
+
+class BackgroundConfig(BaseModel):
+    """Run Bash commands and subagents in the background."""
+
+    enabled: bool = False
+    max_tasks: int = 16
+    """Refuse new background work beyond this many live tasks."""
+    max_output_chars: int = 200_000
+    """Cap retained output per task (head and tail are kept)."""
+    default_timeout: float = 0.0
+    """Seconds before a background command is killed. 0 disables the timeout."""
+    kill_on_close: bool = True
+    """Stop live background tasks when the owning agent exits."""
+
+
+class HookCommand(BaseModel):
+    """One hook command. It receives a JSON payload on stdin."""
+
+    matcher: str = "*"
+    """Tool-name glob(s) for PreToolUse/PostToolUse, comma separated."""
+    command: str
+    timeout: float = 30.0
+    env: dict[str, str] = Field(default_factory=dict)
+    fail_open: bool = False
+    """Continue when the hook times out or crashes. Exit code 2 always blocks."""
+
+
+class HooksConfig(BaseModel):
+    """Event hooks compatible with the ZCode/Claude hook shape."""
+
+    enabled: bool = False
+    config_file: str | None = None
+    auto_discover: bool = True
+    """Load .mini-swe-agent/hooks.yaml and ~/.mini-swe-agent/hooks.yaml."""
+    PreToolUse: list[HookCommand] = Field(default_factory=list)
+    PostToolUse: list[HookCommand] = Field(default_factory=list)
+    UserPromptSubmit: list[HookCommand] = Field(default_factory=list)
+    SessionStart: list[HookCommand] = Field(default_factory=list)
+    SessionEnd: list[HookCommand] = Field(default_factory=list)
+    Stop: list[HookCommand] = Field(default_factory=list)
+    PreCompact: list[HookCommand] = Field(default_factory=list)
+    PostCompact: list[HookCommand] = Field(default_factory=list)
+
+
+class SessionConfig(BaseModel):
+    """Persist the full conversation so it can be resumed later."""
+
+    enabled: bool = False
+    id: str | None = None
+    """Explicit session id. Generated when omitted."""
+    dir: str = "~/.mini-swe-agent/sessions"
+    autosave: bool = True
+    keep_media: bool = True
+    """Keep base64 image/video parts in session files."""
+    max_sessions: int = 0
+    """Prune the oldest session files beyond this count. 0 disables pruning."""
+
+
+class AgentBusConfig(BaseModel):
+    """Agent-to-agent messages (SendMessage)."""
+
+    enabled: bool = False
+    max_inbox: int = 50
 
 
 class VisionConfig(BaseModel):

@@ -84,6 +84,23 @@ class TodoStore:
         return "\n".join(lines)
 
 
+def build_todo_read_tool(store: TodoStore) -> Tool:
+    def handler(args: dict) -> dict:
+        return ok(store.format())
+
+    return Tool(
+        name="TodoRead",
+        description=(
+            "Return the current todo list with statuses and priorities. Use it to check progress "
+            "without rewriting the list."
+        ),
+        parameters={"type": "object", "properties": {}},
+        handler=handler,
+        read_only=True,
+        metadata={"persist_path": str(store.path)},
+    )
+
+
 def build_todo_tool(store: TodoStore) -> Tool:
     def handler(args: dict) -> dict:
         todos = args.get("todos")

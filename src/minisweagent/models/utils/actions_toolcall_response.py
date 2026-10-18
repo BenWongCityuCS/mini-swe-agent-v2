@@ -18,7 +18,15 @@ BASH_TOOL_RESPONSE_API = {
             "command": {
                 "type": "string",
                 "description": "The bash command to execute",
-            }
+            },
+            "run_in_background": {
+                "type": "boolean",
+                "description": "Return immediately and run the command in the background.",
+            },
+            "timeout": {
+                "type": "number",
+                "description": "Optional timeout in seconds for a background command",
+            },
         },
         "required": ["command"],
     },
@@ -100,7 +108,15 @@ def parse_toolcall_actions_response(
                 error=error_msg.strip(), actions=[], has_tool_calls=True, **template_kwargs
             )
             raise FormatError(_format_error_message(error_text))
-        actions.append({"command": args["command"], "tool_call_id": tool_call.get("call_id") or tool_call.get("id")})
+        action = {"command": args["command"], "tool_call_id": tool_call.get("call_id") or tool_call.get("id")}
+        if args.get("run_in_background"):
+            action["run_in_background"] = True
+        if args.get("timeout") is not None:
+            try:
+                action["timeout"] = float(args["timeout"])
+            except (TypeError, ValueError):
+                pass
+        actions.append(action)
     return actions
 
 

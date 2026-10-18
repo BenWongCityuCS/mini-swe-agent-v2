@@ -2,7 +2,9 @@ from pathlib import Path
 
 from minisweagent.agents.default import AgentConfig
 from minisweagent.environments.local import LocalEnvironment
-from minisweagent.extensions.config import SubagentsConfig
+from minisweagent.extensions.agent_bus import AgentBus
+from minisweagent.extensions.background import BackgroundTaskManager
+from minisweagent.extensions.config import AgentBusConfig, BackgroundConfig, SubagentsConfig
 from minisweagent.extensions.registry import ToolRegistry
 from minisweagent.extensions.subagents import (
     build_task_tool,
@@ -108,6 +110,28 @@ def test_task_tool_runs_subagent(tmp_path):
     assert 'status="Submitted"' in result["output"]
     assert parent.cost > 0
     assert parent.n_calls > 0
+
+
+def test_task_tool_runs_subagent_in_background(tmp_path):
+    write_profile(tmp_path, "worker")
+    parent = make_parent(tmp_path)
+    parent._background = BackgroundTaskManager(BackgroundConfig(enabled=True), str(tmp_path))
+    parent._bus = AgentBus(AgentBusConfig(enabled=True))
+    parent._bus.register("main")
+    parent.agent_id = "main"
+
+    profiles = load_agent_profiles(parent.config.subagents, tmp_path)
+    tool = build_task_tool(parent, profiles, parent.config.subagents)
+    result = tool.handler(
+        {"description": "do it", "prompt": "finish", "subagent_type": "worker", "run_in_background": True}
+    )
+    assert result["returncode"] == 0
+    assert result["task_id"].startswith("bg-")
+    assert result["agent_id"].startswith("sub-worker-")
+
+    info = parent._background.poll(result["task_id"], wait=True, timeout=10)
+    assert info["status"] == "completed"
+    assert "Submitted" in info["output"]
 
 
 def test_task_tool_errors(tmp_path):

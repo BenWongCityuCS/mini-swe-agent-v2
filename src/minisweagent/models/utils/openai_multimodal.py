@@ -22,8 +22,8 @@ def _expand_content_string(*, content: str, pattern: str) -> list[dict]:
             result.append({"type": "text", "text": text_before})
         content_type = match.group(1).strip()
         extracted = match.group(2).strip()
-        if content_type == "image_url":
-            result.append({"type": "image_url", "image_url": {"url": extracted}})
+        if content_type in {"image_url", "video_url"}:
+            result.append({"type": content_type, content_type: {"url": extracted}})
         last_end = match.end()
     text_after = content[last_end:]
     if text_after:

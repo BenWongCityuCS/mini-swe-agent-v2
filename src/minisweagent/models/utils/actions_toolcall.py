@@ -19,7 +19,18 @@ BASH_TOOL = {
                 "command": {
                     "type": "string",
                     "description": "The bash command to execute",
-                }
+                },
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": (
+                        "Return immediately and run the command in the background. "
+                        "Read it with TaskOutput and stop it with TaskStop."
+                    ),
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Optional timeout in seconds for a background command",
+                },
             },
             "required": ["command"],
         },
@@ -85,7 +96,15 @@ def parse_toolcall_actions(
                 }
             )
         if name == "bash":
-            actions.append({"command": args["command"], "tool_call_id": tool_call.id})
+            action = {"command": args["command"], "tool_call_id": tool_call.id}
+            if args.get("run_in_background"):
+                action["run_in_background"] = True
+            if args.get("timeout") is not None:
+                try:
+                    action["timeout"] = float(args["timeout"])
+                except (TypeError, ValueError):
+                    pass
+            actions.append(action)
         else:
             actions.append({"tool": name, "args": args, "tool_call_id": tool_call.id})
     return actions

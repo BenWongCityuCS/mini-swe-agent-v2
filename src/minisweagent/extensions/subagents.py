@@ -27,7 +27,7 @@ from minisweagent.extensions.config import SubagentsConfig
 from minisweagent.extensions.edit_tools import FileTracker, build_edit_tools
 from minisweagent.extensions.registry import Tool, ToolRegistry, err, ok
 from minisweagent.extensions.skills import parse_frontmatter
-from minisweagent.extensions.todo import TodoStore, build_todo_tool
+from minisweagent.extensions.todo import TodoStore, build_todo_read_tool, build_todo_tool
 from minisweagent.extensions.tools import build_read_only_tools
 
 logger = logging.getLogger("extensions")
@@ -46,6 +46,51 @@ MSWEA_SUBMIT
 The text after the first line is returned to the coordinator, so it must contain
 everything the coordinator needs. Do not submit an empty report.
 """
+
+PLAN_SYSTEM_PROMPT = """You are a read-only planning subagent.
+
+Inspect the codebase and produce an implementation plan. Do not modify files
+and do not attempt the work yourself. Identify the affected files and symbols,
+then give ordered, concrete steps, risks, and the tests that should pass.
+
+When you are done, submit the plan with ONE bash command that prints the marker
+on the first line and the plan after it. Use a heredoc, for example:
+
+cat <<'MSWEA_SUBMIT'
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+Goal: ...
+Files: /path/to/file.py:123
+Steps:
+1. ...
+Risks: ...
+Tests: ...
+MSWEA_SUBMIT
+
+Do not submit an empty report.
+"""
+
+VISUAL_JUDGE_SYSTEM_PROMPT = """You are a visual acceptance judge.
+
+Inspect the images the coordinator points at. Read attaches images as native
+model input when enabled; use the Vision tool when it is available. Judge what
+a user would actually see: layout, composition, legibility, clipping, overlap,
+spacing, alignment, and visual asset quality. Do not speculate about code.
+
+Return one JSON object per line, and nothing else in the verdict list:
+{"image": "path-or-label", "verdict": "pass", "issues": []}
+
+A fail must name something visible in the image. If everything looks acceptable,
+return pass with an empty issues list.
+
+Submit with ONE bash command that prints the marker on the first line and the
+verdict lines after it:
+
+cat <<'MSWEA_SUBMIT'
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+{"image": "page-1.png", "verdict": "pass", "issues": []}
+MSWEA_SUBMIT
+"""
+
 
 EXPLORE_SYSTEM_PROMPT = """You are a read-only exploration subagent.
 
@@ -113,6 +158,30 @@ BUILTIN_PROFILES: dict[str, AgentProfile] = {
         system_prompt=EXPLORE_SYSTEM_PROMPT,
         tools=["Read", "Grep", "Glob"],
         inject_prompts=False,
+        builtin=True,
+    ),
+    "plan": AgentProfile(
+        name="plan",
+        description=(
+            "Read-only planning agent. Investigates the codebase and returns an ordered, "
+            "implementation-ready plan with files, risks, and tests. It does not edit."
+        ),
+        system_prompt=PLAN_SYSTEM_PROMPT,
+        tools=["Read", "Grep", "Glob"],
+        inject_prompts=False,
+        max_steps=40,
+        builtin=True,
+    ),
+    "visual-judge": AgentProfile(
+        name="visual-judge",
+        description=(
+            "Visual acceptance agent. Inspects rendered screenshots or images and returns one "
+            "pass/fail verdict per image with evidence-backed issues. Needs read_media or Vision."
+        ),
+        system_prompt=VISUAL_JUDGE_SYSTEM_PROMPT,
+        tools=["Read", "Glob", "Vision"],
+        inject_prompts=False,
+        max_steps=30,
         builtin=True,
     ),
 }
@@ -240,23 +309,39 @@ def _build_sub_model(parent, profile: AgentProfile, reasoning_effort: str | None
     return model
 
 
-def _subagent_registry(parent, profile: AgentProfile) -> ToolRegistry:
+def _subagent_registry(parent, profile: AgentProfile, agent_id: str) -> ToolRegistry:
     registry = ToolRegistry()
     # Reuse shared extension tools (Skill, MCP, Browser, Vision, plugin tools).
     # Workspace tools are rebuilt with fresh state so subagents do not contaminate
     # the parent's read-before-edit tracking or todo list.
-    fresh = {"Read", "Grep", "Glob", "Write", "Edit", "TodoWrite"}
+    fresh = {"Read", "Grep", "Glob", "Write", "Edit", "TodoWrite", "TodoRead", "SendMessage"}
     for name in parent._tools.names():  # noqa: SLF001 - extensions are part of the agent
         if name in fresh or name == "Task":
             continue
         registry._tools[name] = parent._tools._tools[name]  # noqa: SLF001
 
     tracker = FileTracker()
-    registry.extend(build_read_only_tools(parent._workspace, tracker))  # noqa: SLF001
-    if parent.config.tools.edit:
+    registry.extend(
+        build_read_only_tools(
+            parent._workspace,  # noqa: SLF001
+            tracker,
+            read_media=parent.config.tools.read_media,  # noqa: SLF001
+            max_image_bytes=parent.config.tools.max_image_bytes,  # noqa: SLF001
+            max_video_bytes=parent.config.tools.max_video_bytes,  # noqa: SLF001
+            media_detail=parent.config.tools.media_detail,  # noqa: SLF001
+        )
+    )
+    if parent.config.tools.edit:  # noqa: SLF001
         registry.extend(build_edit_tools(parent._workspace, tracker))  # noqa: SLF001
-    if parent.config.tools.todo:
-        registry.add(build_todo_tool(TodoStore(parent._workspace, persist=parent.config.tools.todo_persist)))  # noqa: SLF001
+    if parent.config.tools.todo:  # noqa: SLF001
+        store = TodoStore(parent._workspace, persist=parent.config.tools.todo_persist)  # noqa: SLF001
+        registry.add(build_todo_tool(store))
+        registry.add(build_todo_read_tool(store))
+    bus = getattr(parent, "_bus", None)
+    if bus is not None:
+        from minisweagent.extensions.agent_bus import build_send_message_tool
+
+        registry.add(build_send_message_tool(bus, agent_id))
 
     return registry.filter(profile.tools)
 
@@ -287,15 +372,20 @@ def build_task_tool(parent, profiles: dict[str, AgentProfile], config: Subagents
             )
 
         reasoning = args.get("reasoning_effort") or config.reasoning_effort
-        try:
+        slug = "".join(ch if ch.isalnum() else "-" for ch in name).strip("-")[:24] or "agent"
+        sub_agent_id = f"sub-{slug}-{uuid.uuid4().hex[:6]}"
+
+        def run_subagent(cancel_event=None) -> dict:
             with GLOBAL_SUBAGENT_GATE.slot():
                 sub_model = _build_sub_model(parent, profile, reasoning)
                 if sub_model is None:
-                    return err("The configured model cannot be created for a subagent")
-                tools = _subagent_registry(parent, profile)
+                    raise RuntimeError("The configured model cannot be created for a subagent")
+                tools = _subagent_registry(parent, profile, sub_agent_id)
                 setter = getattr(sub_model, "set_extra_tools", None)
                 if setter is None and tools.names():
-                    return err("The configured model does not support extension tools (use model_class=litellm)")
+                    raise RuntimeError(
+                        "The configured model does not support extension tools (use model_class=litellm)"
+                    )
                 if setter is not None:
                     setter(tools.specs())
 
@@ -316,6 +406,10 @@ def build_task_tool(parent, profiles: dict[str, AgentProfile], config: Subagents
                 sub_config.vision.enabled = False
                 sub_config.plugins.enabled = False
                 sub_config.automations.enabled = False
+                sub_config.session.enabled = False
+                sub_config.hooks.enabled = False
+                sub_config.background.enabled = False
+                sub_config.bus.enabled = False
                 sub_config.tools.read_only = False
                 sub_config.prompts.files = []
                 sub_config.prompts.dirs = []
@@ -338,6 +432,11 @@ def build_task_tool(parent, profiles: dict[str, AgentProfile], config: Subagents
                         parent.env,
                         tool_registry=tools,
                         prompt_sections=sections,
+                        background_manager=getattr(parent, "_background", None),
+                        hook_runner=getattr(parent, "_hooks", None),
+                        agent_bus=getattr(parent, "_bus", None),
+                        agent_id=sub_agent_id,
+                        cancel_event=cancel_event,
                         **sub_config.model_dump(exclude={"agent_class"}),
                     )
                     subagent._subagent_depth = depth + 1  # noqa: SLF001
@@ -346,22 +445,58 @@ def build_task_tool(parent, profiles: dict[str, AgentProfile], config: Subagents
                 finally:
                     CURRENT_GROUP.reset(group_token)
                     CURRENT_SESSION.reset(session_token)
+
+            parent.cost += subagent.cost
+            parent.n_calls += subagent.n_calls
+            parent.n_compaction_calls += subagent.n_compaction_calls
+
+            status = result.get("exit_status") or "unknown"
+            submission = result.get("submission") or result.get("content") or ""
+            return {
+                "exit_status": status,
+                "submission": _truncate(str(submission), config.max_result_chars),
+                "model_name": getattr(getattr(sub_model, "config", None), "model_name", "inherit"),
+            }
+
+        if args.get("run_in_background"):
+            background = getattr(parent, "_background", None)
+            if background is None:
+                return err("Background tasks are disabled (agent.background.enabled).")
+            # Register now so SendMessage can target the subagent before its
+            # worker thread has finished constructing the agent.
+            bus = getattr(parent, "_bus", None)
+            if bus is not None:
+                bus.register(sub_agent_id)
+            started = background.start_callable(
+                lambda event: run_subagent(event),
+                label=f"{name}: {prompt[:80]}",
+                owner=parent.agent_id,
+                kind="agent",
+            )
+            if started.get("returncode") != 0:
+                return started
+            task_id = started.get("task_id")
+            return ok(
+                f"Started background subagent {sub_agent_id} as {task_id}. "
+                f"Use TaskOutput(task_id={task_id!r}) for the report, or "
+                f"SendMessage(to={sub_agent_id!r}, ...) to steer it.",
+                task_id=task_id,
+                agent_id=sub_agent_id,
+            )
+
+        try:
+            report = run_subagent()
         except TimeoutError as exc:
             return err(str(exc))
         except Exception as exc:
             logger.exception("subagent %s failed", name)
             return err(f"Subagent {name} failed: {type(exc).__name__}: {exc}")
 
-        parent.cost += subagent.cost
-        parent.n_calls += subagent.n_calls
-        parent.n_compaction_calls += subagent.n_compaction_calls
-
-        status = result.get("exit_status") or "unknown"
-        submission = result.get("submission") or result.get("content") or ""
-        body = _truncate(str(submission), config.max_result_chars)
-        model_name = getattr(getattr(sub_model, "config", None), "model_name", "inherit")
         return ok(
-            f'<subagent_result type="{name}" model="{model_name}" status="{status}">\n{body}\n</subagent_result>'
+            f'<subagent_result type="{name}" model="{report["model_name"]}" '
+            f'status="{report["exit_status"]}" agent_id="{sub_agent_id}">\n'
+            f'{report["submission"]}\n</subagent_result>',
+            agent_id=sub_agent_id,
         )
 
     return Tool(
@@ -387,6 +522,13 @@ def build_task_tool(parent, profiles: dict[str, AgentProfile], config: Subagents
                     "description": (
                         "Optional thinking effort for this subagent (provider payload field). "
                         "Overrides the profile's reasoning_effort. Examples: minimal, low, medium, high, max."
+                    ),
+                },
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": (
+                        "Return immediately with a task id and agent id. Read the report with TaskOutput "
+                        "and steer the subagent with SendMessage."
                     ),
                 },
             },
