@@ -2784,6 +2784,7 @@
 <span class="c1"># Read this first: https://mini-swe-agent.com/latest/usage/mini/  (usage)</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
 
@@ -2792,9 +2793,11 @@
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent</span><span class="w"> </span><span class="kn">import</span> <span class="n">global_config_dir</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_agent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionStore</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents.utils.prompt_user</span><span class="w"> </span><span class="kn">import</span> <span class="n">_multiline_prompt</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">builtin_config_dir</span><span class="p">,</span> <span class="n">get_config_from_spec</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.environments</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_environment</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionConfig</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_model</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.run.utilities.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">configure_if_first_time</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.utils.serialize</span><span class="w"> </span><span class="kn">import</span> <span class="n">UNSET</span><span class="p">,</span> <span class="n">recursive_merge</span>
@@ -2843,8 +2846,35 @@
     <span class="n">config_spec</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">DEFAULT_CONFIG_FILE</span><span class="p">)],</span> <span class="s2">"-c"</span><span class="p">,</span> <span class="s2">"--config"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="n">_CONFIG_SPEC_HELP_TEXT</span><span class="p">),</span>
     <span class="n">output</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_OUTPUT_FILE</span><span class="p">,</span> <span class="s2">"-o"</span><span class="p">,</span> <span class="s2">"--output"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Output trajectory file"</span><span class="p">),</span>
     <span class="n">exit_immediately</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--exit-immediately"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Exit immediately when the agent wants to finish instead of prompting."</span><span class="p">,</span> <span class="n">rich_help_panel</span><span class="o">=</span><span class="s2">"Advanced"</span><span class="p">),</span>
+    <span class="n">resume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"--resume"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Resume a saved session id or path"</span><span class="p">),</span>
+    <span class="n">continue_session</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--continue"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Resume the most recent session in this workspace"</span><span class="p">),</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"--session-id"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Use a specific id for a new session"</span><span class="p">),</span>
+    <span class="n">list_sessions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--list-sessions"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"List saved sessions and exit"</span><span class="p">),</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
     <span class="c1"># fmt: on</span>
+    <span class="c1"># Direct Python callers (tests, scripts) can omit options; Typer's</span>
+    <span class="c1"># OptionInfo defaults are truthy, so normalize them before using booleans.</span>
+    <span class="n">resume</span> <span class="o">=</span> <span class="n">resume</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">resume</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">continue_session</span> <span class="o">=</span> <span class="n">continue_session</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">continue_session</span><span class="p">,</span> <span class="nb">bool</span><span class="p">)</span> <span class="k">else</span> <span class="kc">False</span>
+    <span class="n">session_id</span> <span class="o">=</span> <span class="n">session_id</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">list_sessions</span> <span class="o">=</span> <span class="n">list_sessions</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">list_sessions</span><span class="p">,</span> <span class="nb">bool</span><span class="p">)</span> <span class="k">else</span> <span class="kc">False</span>
+
+    <span class="k">if</span> <span class="n">resume</span> <span class="ow">and</span> <span class="n">continue_session</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">typer</span><span class="o">.</span><span class="n">BadParameter</span><span class="p">(</span><span class="s2">"--resume and --continue are mutually exclusive"</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">list_sessions</span><span class="p">:</span>
+        <span class="n">store</span> <span class="o">=</span> <span class="n">SessionStore</span><span class="p">(</span><span class="n">SessionConfig</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">())</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">list</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[yellow]No saved sessions.[/yellow]"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">when</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">"%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M"</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">localtime</span><span class="p">(</span><span class="n">entry</span><span class="p">[</span><span class="s2">"updated_at"</span><span class="p">]))</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"[bold green]</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'id'</span><span class="p">]</span><span class="si">}</span><span class="s2">[/bold green]  </span><span class="si">{</span><span class="n">when</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'status'</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">'running'</span><span class="si">}</span><span class="s2">  "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'n_calls'</span><span class="p">]</span><span class="si">}</span><span class="s2"> calls  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'workspace'</span><span class="p">]</span><span class="si">}</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'task'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
     <span class="n">configure_if_first_time</span><span class="p">()</span>
 
     <span class="c1"># Build the config from the command line arguments</span>
@@ -2860,6 +2890,10 @@
             <span class="s2">"cost_limit"</span><span class="p">:</span> <span class="n">cost_limit</span> <span class="k">if</span> <span class="n">cost_limit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
             <span class="s2">"confirm_exit"</span><span class="p">:</span> <span class="kc">False</span> <span class="k">if</span> <span class="n">exit_immediately</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
             <span class="s2">"output_path"</span><span class="p">:</span> <span class="n">output</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
+            <span class="s2">"session"</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">"enabled"</span><span class="p">:</span> <span class="kc">True</span> <span class="k">if</span> <span class="p">(</span><span class="n">resume</span> <span class="ow">or</span> <span class="n">continue_session</span> <span class="ow">or</span> <span class="n">session_id</span><span class="p">)</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
+                <span class="s2">"id"</span><span class="p">:</span> <span class="n">session_id</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
+            <span class="p">},</span>
         <span class="p">},</span>
         <span class="s2">"model"</span><span class="p">:</span> <span class="p">{</span>
             <span class="s2">"model_class"</span><span class="p">:</span> <span class="n">model_class</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
@@ -2871,17 +2905,26 @@
     <span class="p">})</span>
     <span class="n">config</span> <span class="o">=</span> <span class="n">recursive_merge</span><span class="p">(</span><span class="o">*</span><span class="n">configs</span><span class="p">)</span>
 
+    <span class="n">resume_spec</span> <span class="o">=</span> <span class="n">resume</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">"latest"</span> <span class="k">if</span> <span class="n">continue_session</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
     <span class="k">if</span> <span class="p">(</span><span class="n">run_task</span> <span class="o">:=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"run"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"task"</span><span class="p">,</span> <span class="n">UNSET</span><span class="p">))</span> <span class="ow">is</span> <span class="n">UNSET</span><span class="p">:</span>
-        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold yellow]What do you want to do?"</span><span class="p">)</span>
-        <span class="n">run_task</span> <span class="o">=</span> <span class="n">_multiline_prompt</span><span class="p">()</span>
-        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold green]Got that, thanks![/bold green]"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">resume_spec</span><span class="p">:</span>
+            <span class="n">run_task</span> <span class="o">=</span> <span class="s2">""</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold yellow]What do you want to do?"</span><span class="p">)</span>
+            <span class="n">run_task</span> <span class="o">=</span> <span class="n">_multiline_prompt</span><span class="p">()</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold green]Got that, thanks![/bold green]"</span><span class="p">)</span>
 
     <span class="n">model</span> <span class="o">=</span> <span class="n">get_model</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"model"</span><span class="p">,</span> <span class="p">{}))</span>
     <span class="n">env</span> <span class="o">=</span> <span class="n">get_environment</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"environment"</span><span class="p">,</span> <span class="p">{}),</span> <span class="n">default_type</span><span class="o">=</span><span class="s2">"local"</span><span class="p">)</span>
     <span class="n">agent</span> <span class="o">=</span> <span class="n">get_agent</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">env</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"agent"</span><span class="p">,</span> <span class="p">{}),</span> <span class="n">default_type</span><span class="o">=</span><span class="s2">"interactive"</span><span class="p">)</span>
-    <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">resume_spec</span><span class="p">:</span>
+        <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">,</span> <span class="n">resume</span><span class="o">=</span><span class="n">resume_spec</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">)</span>
     <span class="k">if</span> <span class="p">(</span><span class="n">output_path</span> <span class="o">:=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"agent"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"output_path"</span><span class="p">)):</span>
         <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Saved trajectory to [bold green]'</span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">'[/bold green]"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="s2">"_session_store"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Session: [bold green]</span><span class="si">{</span><span class="n">agent</span><span class="o">.</span><span class="n">_session_id</span><span class="si">}</span><span class="s2">[/bold green]"</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">agent</span>
 
 
@@ -3098,6 +3141,26 @@
         <span class="n"><span title="typer.Option(help)">help</span></span><span class="o">=</span><span class="s2">"Exit immediately when the agent wants to finish instead of prompting."</span><span class="p">,</span>
         <span class="n"><span title="typer.Option(rich_help_panel)">rich_help_panel</span></span><span class="o">=</span><span class="s2">"Advanced"</span><span class="p">,</span>
     <span class="p">),</span>
+    <span class="n">resume</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n"><span title="typer.Option">Option</span></span><span class="p">(</span>
+        <span class="kc">None</span><span class="p">,</span>
+        <span class="s2">"--resume"</span><span class="p">,</span>
+        <span class="n"><span title="typer.Option(help)">help</span></span><span class="o">=</span><span class="s2">"Resume a saved session id or path"</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="n">continue_session</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="n"><span title="typer.Option">Option</span></span><span class="p">(</span>
+        <span class="kc">False</span><span class="p">,</span>
+        <span class="s2">"--continue"</span><span class="p">,</span>
+        <span class="n"><span title="typer.Option(help)">help</span></span><span class="o">=</span><span class="s2">"Resume the most recent session in this workspace"</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n"><span title="typer.Option">Option</span></span><span class="p">(</span>
+        <span class="kc">None</span><span class="p">,</span>
+        <span class="s2">"--session-id"</span><span class="p">,</span>
+        <span class="n"><span title="typer.Option(help)">help</span></span><span class="o">=</span><span class="s2">"Use a specific id for a new session"</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="n">list_sessions</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="n"><span title="typer.Option">Option</span></span><span class="p">(</span>
+        <span class="kc">False</span><span class="p">,</span>
+        <span class="s2">"--list-sessions"</span><span class="p">,</span>
+        <span class="n"><span title="typer.Option(help)">help</span></span><span class="o">=</span><span class="s2">"List saved sessions and exit"</span><span class="p">,</span>
+    <span class="p">),</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="typing.Any">Any</span></span>
 </code></pre></div>
 
@@ -3106,10 +3169,7 @@
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/minisweagent/run/mini.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tbody><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 54</span>
-<span class="normal"> 55</span>
-<span class="normal"> 56</span>
-<span class="normal"> 57</span>
+              <div class="highlight"><table class="highlighttable"><tbody><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 57</span>
 <span class="normal"> 58</span>
 <span class="normal"> 59</span>
 <span class="normal"> 60</span>
@@ -3157,7 +3217,50 @@
 <span class="normal">102</span>
 <span class="normal">103</span>
 <span class="normal">104</span>
-<span class="normal">105</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="n">_HELP_TEXT</span><span class="p">)</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">command</span><span class="p">(</span><span class="n">help</span><span class="o">=</span><span class="n">_HELP_TEXT</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span>
     <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"--model"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Model to use"</span><span class="p">,),</span>
     <span class="n">model_class</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"--model-class"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Model class to use (e.g., 'litellm' or 'minisweagent.models.litellm_model.LitellmModel')"</span><span class="p">,</span> <span class="n">rich_help_panel</span><span class="o">=</span><span class="s2">"Advanced"</span><span class="p">),</span>
@@ -3169,8 +3272,35 @@
     <span class="n">config_spec</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">DEFAULT_CONFIG_FILE</span><span class="p">)],</span> <span class="s2">"-c"</span><span class="p">,</span> <span class="s2">"--config"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="n">_CONFIG_SPEC_HELP_TEXT</span><span class="p">),</span>
     <span class="n">output</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="n">DEFAULT_OUTPUT_FILE</span><span class="p">,</span> <span class="s2">"-o"</span><span class="p">,</span> <span class="s2">"--output"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Output trajectory file"</span><span class="p">),</span>
     <span class="n">exit_immediately</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--exit-immediately"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Exit immediately when the agent wants to finish instead of prompting."</span><span class="p">,</span> <span class="n">rich_help_panel</span><span class="o">=</span><span class="s2">"Advanced"</span><span class="p">),</span>
+    <span class="n">resume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"--resume"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Resume a saved session id or path"</span><span class="p">),</span>
+    <span class="n">continue_session</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--continue"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Resume the most recent session in this workspace"</span><span class="p">),</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">"--session-id"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Use a specific id for a new session"</span><span class="p">),</span>
+    <span class="n">list_sessions</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="s2">"--list-sessions"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"List saved sessions and exit"</span><span class="p">),</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
     <span class="c1"># fmt: on</span>
+    <span class="c1"># Direct Python callers (tests, scripts) can omit options; Typer's</span>
+    <span class="c1"># OptionInfo defaults are truthy, so normalize them before using booleans.</span>
+    <span class="n">resume</span> <span class="o">=</span> <span class="n">resume</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">resume</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">continue_session</span> <span class="o">=</span> <span class="n">continue_session</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">continue_session</span><span class="p">,</span> <span class="nb">bool</span><span class="p">)</span> <span class="k">else</span> <span class="kc">False</span>
+    <span class="n">session_id</span> <span class="o">=</span> <span class="n">session_id</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">list_sessions</span> <span class="o">=</span> <span class="n">list_sessions</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">list_sessions</span><span class="p">,</span> <span class="nb">bool</span><span class="p">)</span> <span class="k">else</span> <span class="kc">False</span>
+
+    <span class="k">if</span> <span class="n">resume</span> <span class="ow">and</span> <span class="n">continue_session</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">typer</span><span class="o">.</span><span class="n">BadParameter</span><span class="p">(</span><span class="s2">"--resume and --continue are mutually exclusive"</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">list_sessions</span><span class="p">:</span>
+        <span class="n">store</span> <span class="o">=</span> <span class="n">SessionStore</span><span class="p">(</span><span class="n">SessionConfig</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">())</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">list</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[yellow]No saved sessions.[/yellow]"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">when</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">"%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M"</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">localtime</span><span class="p">(</span><span class="n">entry</span><span class="p">[</span><span class="s2">"updated_at"</span><span class="p">]))</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"[bold green]</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'id'</span><span class="p">]</span><span class="si">}</span><span class="s2">[/bold green]  </span><span class="si">{</span><span class="n">when</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'status'</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">'running'</span><span class="si">}</span><span class="s2">  "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'n_calls'</span><span class="p">]</span><span class="si">}</span><span class="s2"> calls  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'workspace'</span><span class="p">]</span><span class="si">}</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'task'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
     <span class="n">configure_if_first_time</span><span class="p">()</span>
 
     <span class="c1"># Build the config from the command line arguments</span>
@@ -3186,6 +3316,10 @@
             <span class="s2">"cost_limit"</span><span class="p">:</span> <span class="n">cost_limit</span> <span class="k">if</span> <span class="n">cost_limit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
             <span class="s2">"confirm_exit"</span><span class="p">:</span> <span class="kc">False</span> <span class="k">if</span> <span class="n">exit_immediately</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
             <span class="s2">"output_path"</span><span class="p">:</span> <span class="n">output</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
+            <span class="s2">"session"</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">"enabled"</span><span class="p">:</span> <span class="kc">True</span> <span class="k">if</span> <span class="p">(</span><span class="n">resume</span> <span class="ow">or</span> <span class="n">continue_session</span> <span class="ow">or</span> <span class="n">session_id</span><span class="p">)</span> <span class="k">else</span> <span class="n">UNSET</span><span class="p">,</span>
+                <span class="s2">"id"</span><span class="p">:</span> <span class="n">session_id</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
+            <span class="p">},</span>
         <span class="p">},</span>
         <span class="s2">"model"</span><span class="p">:</span> <span class="p">{</span>
             <span class="s2">"model_class"</span><span class="p">:</span> <span class="n">model_class</span> <span class="ow">or</span> <span class="n">UNSET</span><span class="p">,</span>
@@ -3197,17 +3331,26 @@
     <span class="p">})</span>
     <span class="n">config</span> <span class="o">=</span> <span class="n">recursive_merge</span><span class="p">(</span><span class="o">*</span><span class="n">configs</span><span class="p">)</span>
 
+    <span class="n">resume_spec</span> <span class="o">=</span> <span class="n">resume</span> <span class="ow">or</span> <span class="p">(</span><span class="s2">"latest"</span> <span class="k">if</span> <span class="n">continue_session</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
     <span class="k">if</span> <span class="p">(</span><span class="n">run_task</span> <span class="o">:=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"run"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"task"</span><span class="p">,</span> <span class="n">UNSET</span><span class="p">))</span> <span class="ow">is</span> <span class="n">UNSET</span><span class="p">:</span>
-        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold yellow]What do you want to do?"</span><span class="p">)</span>
-        <span class="n">run_task</span> <span class="o">=</span> <span class="n">_multiline_prompt</span><span class="p">()</span>
-        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold green]Got that, thanks![/bold green]"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">resume_spec</span><span class="p">:</span>
+            <span class="n">run_task</span> <span class="o">=</span> <span class="s2">""</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold yellow]What do you want to do?"</span><span class="p">)</span>
+            <span class="n">run_task</span> <span class="o">=</span> <span class="n">_multiline_prompt</span><span class="p">()</span>
+            <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="s2">"[bold green]Got that, thanks![/bold green]"</span><span class="p">)</span>
 
     <span class="n">model</span> <span class="o">=</span> <span class="n">get_model</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"model"</span><span class="p">,</span> <span class="p">{}))</span>
     <span class="n">env</span> <span class="o">=</span> <span class="n">get_environment</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"environment"</span><span class="p">,</span> <span class="p">{}),</span> <span class="n">default_type</span><span class="o">=</span><span class="s2">"local"</span><span class="p">)</span>
     <span class="n">agent</span> <span class="o">=</span> <span class="n">get_agent</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">env</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"agent"</span><span class="p">,</span> <span class="p">{}),</span> <span class="n">default_type</span><span class="o">=</span><span class="s2">"interactive"</span><span class="p">)</span>
-    <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">resume_spec</span><span class="p">:</span>
+        <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">,</span> <span class="n">resume</span><span class="o">=</span><span class="n">resume_spec</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_task</span><span class="p">)</span>
     <span class="k">if</span> <span class="p">(</span><span class="n">output_path</span> <span class="o">:=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"agent"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"output_path"</span><span class="p">)):</span>
         <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Saved trajectory to [bold green]'</span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">'[/bold green]"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="s2">"_session_store"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">console</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Session: [bold green]</span><span class="si">{</span><span class="n">agent</span><span class="o">.</span><span class="n">_session_id</span><span class="si">}</span><span class="s2">[/bold green]"</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">agent</span>
 </code></pre></div></td></tr></tbody></table></div>
             </details>

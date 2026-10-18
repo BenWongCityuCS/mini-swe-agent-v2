@@ -115,7 +115,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#extensions-skills-subagents-tools-mcp-plugins-browser-vision-automation" class="md-skip">
+        <a href="#extensions-skills-subagents-tools-mcp-plugins-browser-vision-automation-sessions-hooks" class="md-skip">
           Skip to content
         </a>
       
@@ -723,6 +723,61 @@
     <span class="md-ellipsis">
       
         Built-in modern tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#background-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background tasks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-persistence-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session persistence and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent messaging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-images-and-videos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading images and videos
       
     </span>
   </a>
@@ -2744,6 +2799,61 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#background-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background tasks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-persistence-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session persistence and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hooks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent messaging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-images-and-videos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading images and videos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#context-sections-and-compaction" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2890,7 +3000,7 @@
   
 
 
-<h1 id="extensions-skills-subagents-tools-mcp-plugins-browser-vision-automation">Extensions: skills, subagents, tools, MCP, plugins, browser, vision, automation</h1>
+<h1 id="extensions-skills-subagents-tools-mcp-plugins-browser-vision-automation-sessions-hooks">Extensions: skills, subagents, tools, MCP, plugins, browser, vision, automation, sessions, hooks</h1>
 <p>This fork adds an optional extension layer inspired by ZCode. Everything is
 <strong>opt-in</strong> and defaults to disabled, so a stock config behaves like upstream
 mini-swe-agent v2.</p>
@@ -2909,12 +3019,12 @@ models do not expose tool schemas and raise a clear error if extensions are enab
 </thead>
 <tbody>
 <tr>
-<td><code>TodoWrite</code></td>
+<td><code>TodoWrite</code> / <code>TodoRead</code></td>
 <td>Persistent task list at <code>.mini-swe-agent/todos.json</code></td>
 </tr>
 <tr>
 <td><code>Read</code></td>
-<td>Read a file with line numbers</td>
+<td>Read a file with line numbers; attach images/videos with <code>read_media</code></td>
 </tr>
 <tr>
 <td><code>Grep</code></td>
@@ -2938,7 +3048,19 @@ models do not expose tool schemas and raise a clear error if extensions are enab
 </tr>
 <tr>
 <td><code>Task</code></td>
-<td>Delegate to a subagent</td>
+<td>Delegate to a subagent (sync or background)</td>
+</tr>
+<tr>
+<td><code>TaskOutput</code> / <code>TaskStop</code></td>
+<td>Read or stop background commands and subagents</td>
+</tr>
+<tr>
+<td><code>SendMessage</code></td>
+<td>Message another agent (<code>main</code> or a background subagent)</td>
+</tr>
+<tr>
+<td><code>SessionRead</code></td>
+<td>Read a previous session transcript</td>
 </tr>
 <tr>
 <td><code>Vision</code></td>
@@ -2960,7 +3082,97 @@ they never contaminate the coordinator's state.</p>
 <span class="w">    </span><span class="nt">todo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">edit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">todo_persist</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">read_media</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># Read attaches images/videos as native model input</span>
+<span class="w">    </span><span class="nt">max_image_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5000000</span>
+<span class="w">    </span><span class="nt">max_video_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000000</span>
 </code></pre></div>
+<h2 id="background-tasks">Background tasks</h2>
+<p><code>background.enabled</code> adds <code>TaskOutput</code> and <code>TaskStop</code> and lets the built-in
+<code>bash</code> tool take <code>run_in_background: true</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">background</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">max_tasks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+<span class="w">    </span><span class="nt">max_output_chars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200000</span>
+<span class="w">    </span><span class="nt">default_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span><span class="w">     </span><span class="c1"># 0 = no timeout</span>
+<span class="w">    </span><span class="nt">kill_on_close</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<p>The model starts a command and keeps working:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pytest -q"</span><span class="p">,</span><span class="w"> </span><span class="nt">"run_in_background"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<p>It then polls with <code>TaskOutput(task_id="bg-...", wait=true, timeout=30)</code> and
+stops it with <code>TaskStop(task_id="bg-...")</code>. <code>TaskOutput</code> without <code>task_id</code> lists
+all tasks; pass the returned <code>next_offset</code> to read only new output.</p>
+<p><code>Task(..., run_in_background: true)</code> does the same for a subagent. The result
+includes both a task id and an agent id, so the coordinator can read the final
+report with <code>TaskOutput</code> and steer the subagent with <code>SendMessage</code>.</p>
+<p>With <code>LocalEnvironment</code>, output streams while the command runs and <code>TaskStop</code>
+kills the whole process group. Other environments execute the blocking
+<code>env.execute</code> call in a worker thread: output appears when the command finishes
+and stopping is cooperative.</p>
+<h2 id="session-persistence-and-resume">Session persistence and resume</h2>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">session</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">dir</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.mini-swe-agent/sessions"</span>
+<span class="w">    </span><span class="nt">autosave</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">keep_media</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">max_sessions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</code></pre></div>
+<p>Every step writes a JSON session containing the messages, counters, compaction
+state, and todo list (the trajectory file is still written separately). CLI:</p>
+<div class="highlight"><pre><span></span><code>mini<span class="w"> </span>-c<span class="w"> </span>mini.yaml<span class="w"> </span>-c<span class="w"> </span>extensions.yaml<span class="w"> </span>--task<span class="w"> </span><span class="s2">"..."</span><span class="w">          </span><span class="c1"># new session</span>
+mini<span class="w"> </span>...<span class="w"> </span>--resume<span class="w"> </span><span class="m">20261019</span>-101500-ab12cd<span class="w">                   </span><span class="c1"># by id</span>
+mini<span class="w"> </span>...<span class="w"> </span>--resume<span class="w"> </span>/path/to/session.json<span class="w">                    </span><span class="c1"># by path</span>
+mini<span class="w"> </span>...<span class="w"> </span>--continue<span class="w">                                        </span><span class="c1"># latest in this workspace</span>
+mini<span class="w"> </span>...<span class="w"> </span>--session-id<span class="w"> </span>my-fix<span class="w">                               </span><span class="c1"># choose the id</span>
+mini<span class="w"> </span>--list-sessions<span class="w">                                       </span><span class="c1"># list and exit</span>
+</code></pre></div>
+<p>Resuming appends a short "continue" user message and keeps the original system
+prompt, so the model sees the same context it had before. <code>SessionRead</code> lets a
+running agent inspect a previous transcript (text only; images are omitted).</p>
+<h2 id="hooks">Hooks</h2>
+<p>Hooks are shell commands. They receive a JSON payload on stdin and run with the
+workspace as cwd:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">hooks</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">auto_discover</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">   </span><span class="c1"># .mini-swe-agent/hooks.yaml + ~/.mini-swe-agent/hooks.yaml</span>
+<span class="w">    </span><span class="nt">PreToolUse</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matcher</span><span class="p">:</span><span class="w"> </span><span class="s">"bash|Write|Edit"</span><span class="w">   </span><span class="c1"># glob(s), comma separated; * = all</span>
+<span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"python</span><span class="nv"> </span><span class="s">.mini-swe-agent/guard.py"</span>
+<span class="w">        </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<span class="w">    </span><span class="nt">PostToolUse</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matcher</span><span class="p">:</span><span class="w"> </span><span class="s">"*"</span>
+<span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="s">"python</span><span class="nv"> </span><span class="s">.mini-swe-agent/audit.py"</span>
+</code></pre></div>
+<p>Supported events: <code>PreToolUse</code>, <code>PostToolUse</code>, <code>UserPromptSubmit</code>,
+<code>SessionStart</code>, <code>SessionEnd</code>, <code>Stop</code>, <code>PreCompact</code>, <code>PostCompact</code>.</p>
+<p>Payload fields: <code>event</code>, <code>session_id</code>, <code>cwd</code>, and for tool events <code>tool_name</code>,
+<code>tool_input</code>, <code>tool_result</code>. Exit code <strong>2 blocks</strong> the action and returns stderr
+to the model. Other non-zero exits are logged but do not block; a timeout blocks
+unless the entry sets <code>fail_open: true</code>. Stdout is appended to the tool result
+(or injected as <code>&lt;hook_context&gt;</code> for session/prompt events). <code>${WORKSPACE}</code>,
+<code>${SESSION_ID}</code>, and <code>${TOOL_NAME}</code> are expanded in the command.</p>
+<h2 id="agent-messaging">Agent messaging</h2>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">bus</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">max_inbox</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+</code></pre></div>
+<p><code>SendMessage(to="main", message="...")</code> reports to the coordinator;
+<code>SendMessage(to="sub-general-purpose-ab12cd", ...)</code> steers a background
+subagent. Messages are queued and injected as <code>&lt;agent_message&gt;</code> user messages
+before the recipient's next model call; the tool does not wait for a reply.</p>
+<h2 id="reading-images-and-videos">Reading images and videos</h2>
+<p>With <code>tools.read_media: true</code>, <code>Read</code> detects common image and video extensions
+and sends the file as native model input in the next user message (base64 data
+URL). The tool result itself stays short, and token estimates ignore the binary
+payload. <code>max_image_bytes</code> / <code>max_video_bytes</code> guard against oversized files.</p>
+<p>Images use an <code>image_url</code> content part; videos use <code>video_url</code> by default. Set
+<code>tools.video_content_type: image_url</code> for providers that expect video in an
+image part. If the main model has no vision support, leave <code>read_media</code> off and
+use the <code>Vision</code> tool instead.</p>
 <h2 id="context-sections-and-compaction">Context sections and compaction</h2>
 <p>The context layer follows ZCode's design instead of concatenating everything
 into one system prompt:</p>
@@ -3050,7 +3262,13 @@ loaded only when the model calls <code>Skill</code>. <code>${SKILL_DIR}</code>, 
 <code>${SKILL_BASE_DIR}</code>, and <code>${WORKSPACE}</code> are expanded at load time.</p>
 <h2 id="subagents">Subagents</h2>
 <p>A <code>Task</code> tool runs a nested agent with its own context, a filtered tool set, and
-the same workspace. Built-ins: <code>general-purpose</code> and <code>explore</code>.</p>
+the same workspace. Built-ins: <code>general-purpose</code>, <code>explore</code>, <code>plan</code> (read-only
+implementation plan), and <code>visual-judge</code> (pass/fail verdicts for rendered images;
+needs <code>read_media</code> or <code>Vision</code>). A profile file with the same name overrides a
+built-in.</p>
+<p>Pass <code>run_in_background: true</code> to return a task id and agent id immediately. Use
+<code>TaskOutput</code> for the final report and <code>SendMessage</code> to steer the running subagent.
+Synchronous calls return a <code>&lt;subagent_result ... agent_id="..."&gt;</code> block.</p>
 <div class="highlight"><pre><span></span><code>---
 name: reviewer
 description: Reviews a diff and reports risks

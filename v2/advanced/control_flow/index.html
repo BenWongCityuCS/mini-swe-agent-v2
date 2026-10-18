@@ -2639,6 +2639,7 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
@@ -2660,14 +2661,26 @@
     <span class="n">resolve_context_limit</span><span class="p">,</span>
     <span class="n">summary_message</span><span class="p">,</span>
 <span class="p">)</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">ContextWindowExceeded</span><span class="p">,</span> <span class="n">FormatError</span><span class="p">,</span> <span class="n">InterruptAgentFlow</span><span class="p">,</span> <span class="n">LimitsExceeded</span><span class="p">,</span> <span class="n">TimeExceeded</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">sanitize_messages</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">Cancelled</span><span class="p">,</span>
+    <span class="n">ContextWindowExceeded</span><span class="p">,</span>
+    <span class="n">FormatError</span><span class="p">,</span>
+    <span class="n">InterruptAgentFlow</span><span class="p">,</span>
+    <span class="n">LimitsExceeded</span><span class="p">,</span>
+    <span class="n">TimeExceeded</span><span class="p">,</span>
+<span class="p">)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.config</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">AgentBusConfig</span><span class="p">,</span>
     <span class="n">AutomationsConfig</span><span class="p">,</span>
+    <span class="n">BackgroundConfig</span><span class="p">,</span>
     <span class="n">BrowserConfig</span><span class="p">,</span>
     <span class="n">ContextConfig</span><span class="p">,</span>
+    <span class="n">HooksConfig</span><span class="p">,</span>
     <span class="n">McpConfig</span><span class="p">,</span>
     <span class="n">PluginsConfig</span><span class="p">,</span>
     <span class="n">PromptsConfig</span><span class="p">,</span>
+    <span class="n">SessionConfig</span><span class="p">,</span>
     <span class="n">SkillsConfig</span><span class="p">,</span>
     <span class="n">SubagentsConfig</span><span class="p">,</span>
     <span class="n">ToolsConfig</span><span class="p">,</span>
@@ -2718,6 +2731,14 @@
 <span class="w">    </span><span class="sd">"""Kimi WebBridge browser control."""</span>
     <span class="n">vision</span><span class="p">:</span> <span class="n">VisionConfig</span> <span class="o">=</span> <span class="n">VisionConfig</span><span class="p">()</span>
 <span class="w">    </span><span class="sd">"""Separate vision model for images and screenshots."""</span>
+    <span class="n">background</span><span class="p">:</span> <span class="n">BackgroundConfig</span> <span class="o">=</span> <span class="n">BackgroundConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""Run bash commands and subagents in the background."""</span>
+    <span class="n">hooks</span><span class="p">:</span> <span class="n">HooksConfig</span> <span class="o">=</span> <span class="n">HooksConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""Shell hooks around tool calls, prompts, sessions, and compaction."""</span>
+    <span class="n">session</span><span class="p">:</span> <span class="n">SessionConfig</span> <span class="o">=</span> <span class="n">SessionConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""Conversation persistence and resume."""</span>
+    <span class="n">bus</span><span class="p">:</span> <span class="n">AgentBusConfig</span> <span class="o">=</span> <span class="n">AgentBusConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""Agent-to-agent messaging (SendMessage)."""</span>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">DefaultAgent</span><span class="p">:</span>
@@ -2729,12 +2750,20 @@
         <span class="n">config_class</span><span class="p">:</span> <span class="nb">type</span> <span class="o">=</span> <span class="n">AgentConfig</span><span class="p">,</span>
         <span class="n">tool_registry</span><span class="p">:</span> <span class="n">ToolRegistry</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">prompt_sections</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">background_manager</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">hook_runner</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">agent_bus</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">session_store</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">agent_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">cancel_event</span><span class="p">:</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
     <span class="p">):</span>
 <span class="w">        </span><span class="sd">"""See the `AgentConfig` class for permitted keyword arguments.</span>
 
 <span class="sd">        ``tool_registry``/``prompt_sections`` are used internally to build subagents</span>
 <span class="sd">        with a pre-created extension set instead of starting a second MCP client.</span>
+<span class="sd">        The other keyword arguments let subagents share their parent's background</span>
+<span class="sd">        manager, hooks, message bus, and cancellation event.</span>
 <span class="sd">        """</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="n">config_class</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
@@ -2751,6 +2780,17 @@
         <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">env_cwd</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">)):</span>
             <span class="n">env_cwd</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">workspace</span> <span class="ow">or</span> <span class="n">env_cwd</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">())</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span> <span class="o">=</span> <span class="n">agent_id</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"MSWEA_AGENT_ID"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"main"</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cancel_event</span> <span class="o">=</span> <span class="n">cancel_event</span> <span class="ow">or</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="o">=</span> <span class="n">background_manager</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_owns_background</span> <span class="o">=</span> <span class="n">background_manager</span> <span class="ow">is</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span> <span class="o">=</span> <span class="n">hook_runner</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="o">=</span> <span class="n">agent_bus</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="o">=</span> <span class="n">session_store</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">id</span> <span class="ow">or</span> <span class="s2">""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session_created_at</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task</span> <span class="o">=</span> <span class="s2">""</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span> <span class="o">=</span> <span class="n">tool_registry</span> <span class="k">if</span> <span class="n">tool_registry</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">ToolRegistry</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_prompt_sections</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">prompt_sections</span> <span class="ow">or</span> <span class="p">[])</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_skills</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
@@ -2785,6 +2825,8 @@
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"agent.compaction.buffer and the requested output must be smaller than the context limit."</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">tool_registry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_setup_extensions</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s2">"agent"</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_setup_extensions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -2859,19 +2901,58 @@
             <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_read_only_tools</span>
 
             <span class="bp">self</span><span class="o">.</span><span class="n">_file_tracker</span> <span class="o">=</span> <span class="n">FileTracker</span><span class="p">()</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">build_read_only_tools</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file_tracker</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+                <span class="n">build_read_only_tools</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_file_tracker</span><span class="p">,</span>
+                    <span class="n">read_media</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">read_media</span><span class="p">,</span>
+                    <span class="n">max_image_bytes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">max_image_bytes</span><span class="p">,</span>
+                    <span class="n">max_video_bytes</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">max_video_bytes</span><span class="p">,</span>
+                    <span class="n">media_detail</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">media_detail</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">edit</span><span class="p">:</span>
             <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.edit_tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_edit_tools</span>
 
             <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">build_edit_tools</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_file_tracker</span><span class="p">))</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">todo</span><span class="p">:</span>
-            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.todo</span><span class="w"> </span><span class="kn">import</span> <span class="n">TodoStore</span><span class="p">,</span> <span class="n">build_todo_tool</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.todo</span><span class="w"> </span><span class="kn">import</span> <span class="n">TodoStore</span><span class="p">,</span> <span class="n">build_todo_read_tool</span><span class="p">,</span> <span class="n">build_todo_tool</span>
 
             <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span> <span class="o">=</span> <span class="n">TodoStore</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span> <span class="n">persist</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">todo_persist</span><span class="p">)</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">build_todo_tool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_todo</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">build_todo_read_tool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_todo</span><span class="p">))</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_prompt_sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
                 <span class="s2">"Track multi-step work with TodoWrite: pass the complete list, keep exactly one item "</span>
-                <span class="s2">"in_progress, and mark items completed as soon as they are done."</span>
+                <span class="s2">"in_progress, and mark items completed as soon as they are done. Use TodoRead to check it."</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionStore</span><span class="p">,</span> <span class="n">build_session_read_tool</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="o">=</span> <span class="n">SessionStore</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="o">.</span><span class="n">new_id</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">build_session_read_tool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">background</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.background</span><span class="w"> </span><span class="kn">import</span> <span class="n">BackgroundTaskManager</span><span class="p">,</span> <span class="n">build_background_tools</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="o">=</span> <span class="n">BackgroundTaskManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">background</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">build_background_tools</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_background</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">bus</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.agent_bus</span><span class="w"> </span><span class="kn">import</span> <span class="n">AgentBus</span><span class="p">,</span> <span class="n">build_send_message_tool</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="o">=</span> <span class="n">AgentBus</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">bus</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">build_send_message_tool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_bus</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">hooks</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.hooks</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_hook_runner</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span> <span class="o">=</span> <span class="n">build_hook_runner</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">hooks</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span>
+                <span class="n">session_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span>
             <span class="p">)</span>
 
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">vision</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
@@ -2933,12 +3014,16 @@
         <span class="k">return</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">part</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span> <span class="k">if</span> <span class="n">part</span><span class="p">)</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">"""Stop extension resources owned by this agent (browser session, MCP servers)."""</span>
+<span class="w">        </span><span class="sd">"""Stop extension resources owned by this agent (browser, MCP, background tasks)."""</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_browser</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_browser</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mcp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_owns_mcp</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_mcp</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_owns_mcp</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_owns_background</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_background</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span><span class="o">.</span><span class="n">unregister</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">)</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">get_template_vars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">recursive_merge</span><span class="p">(</span>
@@ -2977,25 +3062,43 @@
             <span class="p">)</span>
         <span class="p">)</span>
 
-    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">"""Run step() until agent is finished. Returns dictionary with exit_status, submission keys."""</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">resume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Run step() until agent is finished. Returns dictionary with exit_status, submission keys.</span>
+
+<span class="sd">        Pass ``resume`` (a session id, a path, or ``"latest"``) to continue a saved</span>
+<span class="sd">        conversation instead of starting from the task template.</span>
+<span class="sd">        """</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">extra_template_vars</span> <span class="o">|=</span> <span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="n">task</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">}</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="p">[]</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span> <span class="o">=</span> <span class="n">CompactionState</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="kc">False</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="mi">0</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">base_prompt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">system_template</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">build</span><span class="p">()</span>
-        <span class="n">task_content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">instance_template</span><span class="p">)</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="p">:</span>
-            <span class="n">task_content</span> <span class="o">=</span> <span class="p">(</span>
-                <span class="sa">f</span><span class="s2">"&lt;meta_user&gt;</span><span class="se">\n</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="si">}</span><span class="se">\n</span><span class="s2">&lt;/meta_user&gt;</span><span class="se">\n\n</span><span class="si">{</span><span class="n">task_content</span><span class="si">}</span><span class="s2">"</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task</span> <span class="o">=</span> <span class="n">task</span>
+        <span class="k">if</span> <span class="n">resume</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_load_session</span><span class="p">(</span><span class="n">resume</span><span class="p">,</span> <span class="n">task</span><span class="o">=</span><span class="n">task</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span> <span class="o">=</span> <span class="n">CompactionState</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="o">.</span><span class="n">new_id</span><span class="p">()</span>
+            <span class="n">task_content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_initial_task_content</span><span class="p">()</span>
+            <span class="n">submit_hook</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span><span class="s2">"UserPromptSubmit"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"prompt"</span><span class="p">:</span> <span class="n">task_content</span><span class="p">})</span>
+            <span class="k">if</span> <span class="n">submit_hook</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">submit_hook</span><span class="o">.</span><span class="n">output</span><span class="p">:</span>
+                    <span class="n">task_content</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">"</span><span class="se">\n\n</span><span class="s2">&lt;hook_context&gt;</span><span class="se">\n</span><span class="si">{</span><span class="n">submit_hook</span><span class="o">.</span><span class="n">output</span><span class="si">}</span><span class="se">\n</span><span class="s2">&lt;/hook_context&gt;"</span>
+                <span class="k">if</span> <span class="n">submit_hook</span><span class="o">.</span><span class="n">blocked</span><span class="p">:</span>
+                    <span class="n">task_content</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">"</span><span class="se">\n\n</span><span class="s2">&lt;hook_blocked&gt;</span><span class="se">\n</span><span class="si">{</span><span class="n">submit_hook</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="se">\n</span><span class="s2">&lt;/hook_blocked&gt;"</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_system_content</span><span class="p">()),</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">task_content</span><span class="p">),</span>
             <span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_system_content</span><span class="p">()),</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">task_content</span><span class="p">),</span>
-        <span class="p">)</span>
+        <span class="n">start_hook</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span><span class="s2">"SessionStart"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task</span><span class="p">,</span> <span class="s2">"resumed"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span><span class="p">})</span>
+        <span class="k">if</span> <span class="n">start_hook</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">start_hook</span><span class="o">.</span><span class="n">output</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
+                    <span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span>
+                    <span class="n">content</span><span class="o">=</span><span class="sa">f</span><span class="s1">'&lt;hook_context event="SessionStart"&gt;</span><span class="se">\n</span><span class="si">{</span><span class="n">start_hook</span><span class="o">.</span><span class="n">output</span><span class="si">}</span><span class="se">\n</span><span class="s1">&lt;/hook_context&gt;'</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
                 <span class="k">try</span><span class="p">:</span>
@@ -3023,18 +3126,112 @@
                     <span class="k">raise</span>
                 <span class="k">finally</span><span class="p">:</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">output_path</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_save_session</span><span class="p">()</span>
                 <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"role"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"exit"</span><span class="p">:</span>
                     <span class="k">break</span>
         <span class="k">finally</span><span class="p">:</span>
+            <span class="n">stop_hook</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span><span class="s2">"Stop"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"status"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_status</span><span class="p">()})</span>
+            <span class="k">if</span> <span class="n">stop_hook</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">stop_hook</span><span class="o">.</span><span class="n">output</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Stop hook: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">stop_hook</span><span class="o">.</span><span class="n">output</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_save_session</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span><span class="s2">"SessionEnd"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"status"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_status</span><span class="p">()})</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"extra"</span><span class="p">,</span> <span class="p">{})</span>
 
+    <span class="k">def</span><span class="w"> </span><span class="nf">_initial_task_content</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">base_prompt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">system_template</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">build</span><span class="p">()</span>
+        <span class="n">task_content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">instance_template</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="p">:</span>
+            <span class="n">task_content</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"&lt;meta_user&gt;</span><span class="se">\n</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="si">}</span><span class="se">\n</span><span class="s2">&lt;/meta_user&gt;</span><span class="se">\n\n</span><span class="si">{</span><span class="n">task_content</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">task_content</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_status</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">"running"</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">last</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"role"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"exit"</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">last</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"extra"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"exit_status"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"exit"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="s2">"running"</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_session</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">spec</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.agents.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">SessionStore</span><span class="p">,</span> <span class="n">compaction_state_from_dict</span>
+
+        <span class="n">store</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span>
+        <span class="k">if</span> <span class="n">store</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">store</span> <span class="o">=</span> <span class="n">SessionStore</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="o">=</span> <span class="n">store</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+        <span class="n">messages</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"messages"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">messages</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Session </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'_path'</span><span class="p">)</span><span class="si">}</span><span class="s2"> contains no messages"</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">messages</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cost</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cost"</span><span class="p">)</span> <span class="ow">or</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_calls</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"n_calls"</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_compaction_calls</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"compaction_calls"</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span> <span class="o">=</span> <span class="n">compaction_state_from_dict</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"compaction"</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"microcompacted"</span><span class="p">)</span> <span class="ow">or</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"compaction_failures"</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"id"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">Path</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s2">"_path"</span><span class="p">])</span><span class="o">.</span><span class="n">stem</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_session_created_at</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"created_at"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"task"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"todos"</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s2">"todos"</span><span class="p">]))</span>
+        <span class="n">continuation</span> <span class="o">=</span> <span class="n">task</span> <span class="ow">or</span> <span class="s2">"[Session resumed. Continue from the last state; do not repeat completed work.]"</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task</span> <span class="o">=</span> <span class="n">task</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">continuation</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_save_session</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">autosave</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="o">.</span><span class="n">new_id</span><span class="p">()</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">,</span>
+            <span class="s2">"created_at"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_created_at</span><span class="p">,</span>
+            <span class="s2">"workspace"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">),</span>
+            <span class="s2">"agent_id"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span>
+            <span class="s2">"model"</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="s2">"config"</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="s2">"model_name"</span><span class="p">,</span> <span class="s2">""</span><span class="p">),</span>
+            <span class="s2">"task"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task</span><span class="p">,</span>
+            <span class="s2">"status"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_status</span><span class="p">(),</span>
+            <span class="s2">"n_calls"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_calls</span><span class="p">,</span>
+            <span class="s2">"cost"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">cost</span><span class="p">,</span>
+            <span class="s2">"compaction_calls"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_compaction_calls</span><span class="p">,</span>
+            <span class="s2">"messages"</span><span class="p">:</span> <span class="n">sanitize_messages</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span> <span class="n">keep_media</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">keep_media</span>
+            <span class="p">),</span>
+            <span class="s2">"compaction"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">serialize</span><span class="p">(),</span>
+            <span class="s2">"microcompacted"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span><span class="p">,</span>
+            <span class="s2">"compaction_failures"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span><span class="p">,</span>
+            <span class="s2">"todos"</span><span class="p">:</span> <span class="p">(</span>
+                <span class="p">[</span>
+                    <span class="p">{</span><span class="s2">"content"</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="s2">"status"</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="s2">"priority"</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">priority</span><span class="p">}</span>
+                    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span><span class="o">.</span><span class="n">items</span>
+                <span class="p">]</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="k">else</span> <span class="p">[]</span>
+            <span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s2">"could not save session </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">)</span>
+
     <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
 <span class="w">        </span><span class="sd">"""Query the LM, execute actions."""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_cancelled</span><span class="p">()</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">execute_actions</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">query</span><span class="p">())</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">query</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">"""Query the model and return model messages. Override to add hooks."""</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_cancelled</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_drain_inbox</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_check_limits</span><span class="p">()</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">auto</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_compact_until_fit</span><span class="p">(</span><span class="s2">"auto"</span><span class="p">)</span>
@@ -3068,6 +3265,51 @@
                     <span class="s2">"extra"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"exit_status"</span><span class="p">:</span> <span class="s2">"TimeExceeded"</span><span class="p">,</span> <span class="s2">"submission"</span><span class="p">:</span> <span class="s2">""</span><span class="p">},</span>
                 <span class="p">}</span>
             <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_check_cancelled</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cancel_event</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="n">Cancelled</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">"role"</span><span class="p">:</span> <span class="s2">"exit"</span><span class="p">,</span>
+                    <span class="s2">"content"</span><span class="p">:</span> <span class="s2">"Cancelled"</span><span class="p">,</span>
+                    <span class="s2">"extra"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"exit_status"</span><span class="p">:</span> <span class="s2">"Cancelled"</span><span class="p">,</span> <span class="s2">"submission"</span><span class="p">:</span> <span class="s2">""</span><span class="p">},</span>
+                <span class="p">}</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_drain_inbox</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span><span class="o">.</span><span class="n">drain</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">entry</span><span class="o">.</span><span class="n">render</span><span class="p">()))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_run_hook</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_attachment_messages</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">outputs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+        <span class="n">messages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">output</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">attachment</span> <span class="ow">in</span> <span class="p">(</span><span class="n">output</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"extra"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"attachments"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[]:</span>
+                <span class="n">kind</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"kind"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span>
+                <span class="n">data_url</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"data_url"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">kind</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">"image"</span><span class="p">,</span> <span class="s2">"video"</span><span class="p">}</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">data_url</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">"image"</span><span class="p">:</span>
+                    <span class="n">part</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"type"</span><span class="p">:</span> <span class="s2">"image_url"</span><span class="p">,</span> <span class="s2">"image_url"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="n">data_url</span><span class="p">}}</span>
+                    <span class="k">if</span> <span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"detail"</span><span class="p">):</span>
+                        <span class="n">part</span><span class="p">[</span><span class="s2">"image_url"</span><span class="p">][</span><span class="s2">"detail"</span><span class="p">]</span> <span class="o">=</span> <span class="n">attachment</span><span class="p">[</span><span class="s2">"detail"</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">content_type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">video_content_type</span>
+                    <span class="n">part</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"type"</span><span class="p">:</span> <span class="n">content_type</span><span class="p">,</span> <span class="n">content_type</span><span class="p">:</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="n">data_url</span><span class="p">}}</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">"Attached </span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'path'</span><span class="p">,</span><span class="w"> </span><span class="s1">''</span><span class="p">)</span><span class="si">}</span><span class="s2"> "</span>
+                    <span class="sa">f</span><span class="s2">"(</span><span class="si">{</span><span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'mime'</span><span class="p">,</span><span class="w"> </span><span class="s1">''</span><span class="p">)</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">attachment</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'bytes'</span><span class="p">)</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes)"</span>
+                <span class="p">)</span>
+                <span class="n">messages</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="p">[{</span><span class="s2">"type"</span><span class="p">:</span> <span class="s2">"text"</span><span class="p">,</span> <span class="s2">"text"</span><span class="p">:</span> <span class="n">text</span><span class="p">},</span> <span class="n">part</span><span class="p">])</span>
+                <span class="p">)</span>
+        <span class="k">return</span> <span class="n">messages</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_messages_for_model</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">:</span>
@@ -3122,6 +3364,12 @@
         <span class="k">if</span> <span class="n">boundary</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="kc">False</span>
         <span class="n">before</span> <span class="o">=</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span>
+        <span class="n">pre</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span>
+            <span class="s2">"PreCompact"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"reason"</span><span class="p">:</span> <span class="n">reason</span><span class="p">,</span> <span class="s2">"boundary"</span><span class="p">:</span> <span class="n">boundary</span><span class="p">,</span> <span class="s2">"tokens_before"</span><span class="p">:</span> <span class="n">before</span><span class="p">}</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">pre</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">pre</span><span class="o">.</span><span class="n">blocked</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"PreCompact hook blocked compaction: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">pre</span><span class="o">.</span><span class="n">message</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span>
         <span class="n">prompt</span> <span class="o">=</span> <span class="n">render_summary_prompt</span><span class="p">(</span>
             <span class="n">template</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span>
@@ -3155,6 +3403,9 @@
                 <span class="n">estimated_tokens_after</span><span class="o">=</span><span class="n">after</span><span class="p">,</span>
                 <span class="n">cost</span><span class="o">=</span><span class="n">cost</span><span class="p">,</span>
             <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span>
+            <span class="s2">"PostCompact"</span><span class="p">,</span> <span class="n">extra</span><span class="o">=</span><span class="p">{</span><span class="s2">"reason"</span><span class="p">:</span> <span class="n">reason</span><span class="p">,</span> <span class="s2">"tokens_after"</span><span class="p">:</span> <span class="n">after</span><span class="p">,</span> <span class="s2">"cost"</span><span class="p">:</span> <span class="n">cost</span><span class="p">}</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="kc">True</span>
 
@@ -3237,13 +3488,66 @@
                 <span class="n">outputs</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_execute_action</span><span class="p">,</span> <span class="n">actions</span><span class="p">))</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">outputs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_execute_action</span><span class="p">(</span><span class="n">action</span><span class="p">)</span> <span class="k">for</span> <span class="n">action</span> <span class="ow">in</span> <span class="n">actions</span><span class="p">]</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_observation_messages</span><span class="p">(</span><span class="n">message</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_template_vars</span><span class="p">()))</span>
+        <span class="n">attachments</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_attachment_messages</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+        <span class="c1"># Attachments are delivered as a user message; keep the base64 payload</span>
+        <span class="c1"># out of the tool observation (and therefore out of the trajectory).</span>
+        <span class="n">clean_outputs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">output</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">:</span>
+            <span class="n">extra</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"extra"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+            <span class="k">if</span> <span class="s2">"attachments"</span> <span class="ow">in</span> <span class="n">extra</span><span class="p">:</span>
+                <span class="n">output</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">output</span><span class="p">,</span> <span class="s2">"extra"</span><span class="p">:</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">value</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">extra</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">key</span> <span class="o">!=</span> <span class="s2">"attachments"</span><span class="p">}}</span>
+            <span class="n">clean_outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+        <span class="n">observations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_observation_messages</span><span class="p">(</span>
+            <span class="n">message</span><span class="p">,</span> <span class="n">clean_outputs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_template_vars</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span><span class="o">*</span><span class="n">observations</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">attachments</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span><span class="o">*</span><span class="n">attachments</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">[</span><span class="o">*</span><span class="n">observations</span><span class="p">,</span> <span class="o">*</span><span class="n">attachments</span><span class="p">]</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_execute_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
-        <span class="n">tool_name</span> <span class="o">=</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tool"</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">tool_name</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">tool_name</span> <span class="o">==</span> <span class="s2">"bash"</span><span class="p">:</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">tool_name</span><span class="p">),</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"args"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{})</span>
+        <span class="n">tool_name</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tool"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"bash"</span><span class="p">)</span>
+        <span class="n">tool_input</span> <span class="o">=</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"args"</span><span class="p">)</span> <span class="k">if</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tool"</span><span class="p">)</span> <span class="k">else</span> <span class="p">{</span><span class="s2">"command"</span><span class="p">:</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"command"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tool_input</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"run_in_background"</span><span class="p">):</span>
+            <span class="n">tool_input</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">tool_input</span><span class="p">,</span> <span class="s2">"run_in_background"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+
+        <span class="n">pre</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span>
+            <span class="s2">"PreToolUse"</span><span class="p">,</span> <span class="n">tool_name</span><span class="o">=</span><span class="n">tool_name</span><span class="p">,</span> <span class="n">tool_input</span><span class="o">=</span><span class="n">tool_input</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">pre</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">pre</span><span class="o">.</span><span class="n">blocked</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">"output"</span><span class="p">:</span> <span class="s2">""</span><span class="p">,</span>
+                <span class="s2">"returncode"</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>
+                <span class="s2">"exception_info"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"Blocked by PreToolUse hook: </span><span class="si">{</span><span class="n">pre</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+            <span class="p">}</span>
+
+        <span class="k">if</span> <span class="n">tool_name</span> <span class="o">==</span> <span class="s2">"bash"</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"run_in_background"</span><span class="p">):</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span>
+                        <span class="s2">"output"</span><span class="p">:</span> <span class="s2">""</span><span class="p">,</span>
+                        <span class="s2">"returncode"</span><span class="p">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span>
+                        <span class="s2">"exception_info"</span><span class="p">:</span> <span class="s2">"Background tasks are disabled (agent.background.enabled)."</span><span class="p">,</span>
+                    <span class="p">}</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span><span class="o">.</span><span class="n">start_command</span><span class="p">(</span>
+                        <span class="nb">str</span><span class="p">(</span><span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"command"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">),</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">env</span><span class="p">,</span>
+                        <span class="n">timeout</span><span class="o">=</span><span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"timeout"</span><span class="p">),</span>
+                        <span class="n">owner</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span>
+                    <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">tool_name</span><span class="p">,</span> <span class="n">action</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"args"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{})</span>
+
+        <span class="n">post</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_hook</span><span class="p">(</span>
+            <span class="s2">"PostToolUse"</span><span class="p">,</span> <span class="n">tool_name</span><span class="o">=</span><span class="n">tool_name</span><span class="p">,</span> <span class="n">tool_input</span><span class="o">=</span><span class="n">tool_input</span><span class="p">,</span> <span class="n">tool_result</span><span class="o">=</span><span class="n">result</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">post</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">post</span><span class="o">.</span><span class="n">output</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">"output"</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'output'</span><span class="p">)</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">''</span><span class="si">}</span><span class="se">\n</span><span class="s2">[hook] </span><span class="si">{</span><span class="n">post</span><span class="o">.</span><span class="n">output</span><span class="si">}</span><span class="s2">"</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">serialize</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">extra_dicts</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">"""Serialize agent state to a json-compatible nested dictionary for saving."""</span>
@@ -3294,6 +3598,17 @@
                     <span class="k">else</span> <span class="p">[]</span>
                 <span class="p">),</span>
                 <span class="s2">"automation_dirs"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_automation_dirs</span><span class="p">),</span>
+                <span class="s2">"background_tasks"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span><span class="o">.</span><span class="n">serialize</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[],</span>
+                <span class="s2">"agents"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span><span class="o">.</span><span class="n">serialize</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{},</span>
+            <span class="p">},</span>
+            <span class="s2">"session"</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">"id"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">,</span>
+                <span class="s2">"resumed"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span><span class="p">,</span>
+                <span class="s2">"path"</span><span class="p">:</span> <span class="p">(</span>
+                    <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span><span class="o">.</span><span class="n">path_for</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span><span class="p">))</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span>
+                    <span class="k">else</span> <span class="kc">None</span>
+                <span class="p">),</span>
             <span class="p">},</span>
             <span class="s2">"context"</span><span class="p">:</span> <span class="p">{</span>
                 <span class="s2">"enabled"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">enabled</span><span class="p">,</span>
