@@ -785,10 +785,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#browser-kimi-webbridge" class="md-nav__link">
+  <a href="#browser-webbridge-or-browser-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Browser (Kimi WebBridge)
+        Browser (WebBridge or browser-use)
       
     </span>
   </a>
@@ -2788,10 +2788,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#browser-kimi-webbridge" class="md-nav__link">
+  <a href="#browser-webbridge-or-browser-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Browser (Kimi WebBridge)
+        Browser (WebBridge or browser-use)
       
     </span>
   </a>
@@ -3103,28 +3103,53 @@ mini-automation<span class="w"> </span>serve<span class="w"> </span>--interval<s
 <p>State (last run, status, count) lives in
 <code>.mini-swe-agent/automations-state.json</code>; each run writes a trajectory and a log
 under <code>~/.mini-swe-agent/automations/runs/&lt;name&gt;/</code>.</p>
-<h2 id="browser-kimi-webbridge">Browser (Kimi WebBridge)</h2>
-<p>The browser tool drives the user's real Chrome/Edge through
-<a href="https://github.com/BenWongCityuCS/kimi-webbridge-enhanced">Kimi WebBridge</a>: a
-local daemon (<code>:10086</code>) plus a browser extension. It uses the existing login
-sessions and returns an accessibility snapshot with <code>@e</code> refs.</p>
+<h2 id="browser-webbridge-or-browser-use">Browser (WebBridge or browser-use)</h2>
+<p>The browser tool has two interchangeable backends; the user picks one with
+<code>agent.browser.backend</code>:</p>
+<ul>
+<li><strong><code>webbridge</code></strong> — <a href="https://github.com/BenWongCityuCS/kimi-webbridge-enhanced">Kimi WebBridge</a>
+  drives the user's real Chrome/Edge through a local daemon (<code>:10086</code>) and an
+  extension, using their cookies and login sessions. Snapshots are an
+  accessibility tree with <code>@e</code> refs.</li>
+<li><strong><code>browser_use</code></strong> — <a href="https://github.com/browser-use/browser-use">browser-use</a>
+  runs a Playwright browser (its own profile, or attach over CDP). It does not
+  touch the user's real profile.</li>
+<li><strong><code>auto</code></strong> — prefer WebBridge when its extension is connected; otherwise use
+  browser-use.</li>
+</ul>
+<p>With <code>fallback: true</code> (default), a failed call is retried on the other backend.
+The tool result records the backend and the fallback reason. Actions that only
+WebBridge can express (<code>find_tab</code>, <code>network</code>, <code>upload</code>) automatically fall back
+when browser-use is the selected backend.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">browser</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">webbridge</span>
+<span class="w">    </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">              </span><span class="c1"># webbridge | browser_use | auto</span>
+<span class="w">    </span><span class="nt">fallback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">daemon_url</span><span class="p">:</span><span class="w"> </span><span class="s">"http://127.0.0.1:10086/command"</span>
 <span class="w">    </span><span class="nt">status_url</span><span class="p">:</span><span class="w"> </span><span class="s">"http://127.0.0.1:10086/status"</span>
 <span class="w">    </span><span class="nt">proxy_url</span><span class="p">:</span><span class="w"> </span><span class="s">"http://127.0.0.1:11086/command"</span>
 <span class="w">    </span><span class="nt">prefer_proxy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">session</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">            </span><span class="c1"># generated when omitted</span>
+<span class="w">    </span><span class="nt">session</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">              </span><span class="c1"># generated when omitted</span>
 <span class="w">    </span><span class="nt">group_title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
 <span class="w">    </span><span class="nt">max_tabs_per_session</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
 <span class="w">    </span><span class="nt">auto_close_on_finish</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">timeout_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120</span>
+<span class="w">    </span><span class="nt">network_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">       </span><span class="c1"># false = no external browsing</span>
+<span class="w">    </span><span class="nt">allowed_domains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">         </span><span class="c1"># allowlist (subdomains included)</span>
+<span class="w">    </span><span class="nt">blocked_domains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">         </span><span class="c1"># denylist (subdomains included)</span>
+<span class="w">    </span><span class="nt">allow_localhost</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">browser_use</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">headless</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">      </span><span class="nt">executable_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">    </span><span class="c1"># e.g. /usr/bin/google-chrome</span>
+<span class="w">      </span><span class="nt">user_data_dir</span><span class="p">:</span><span class="w"> </span><span class="s">"~/.mini-swe-agent/playwright-profile"</span>
+<span class="w">      </span><span class="nt">cdp_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">            </span><span class="c1"># e.g. http://127.0.0.1:9222</span>
+<span class="w">      </span><span class="nt">keep_alive</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
 <p>Actions: <code>navigate</code>, <code>find_tab</code>, <code>snapshot</code>, <code>click</code>, <code>fill</code>, <code>evaluate</code>,
 <code>screenshot</code>, <code>list_tabs</code>, <code>close_tab</code>, <code>close_session</code>, <code>save_as_pdf</code>,
-<code>network</code>, <code>upload</code>, <code>cdp</code>, plus tab-group actions.</p>
+<code>network</code>, <code>upload</code>, <code>cdp</code>, plus tab-group actions. browser-use supports all of
+them except <code>find_tab</code>, <code>network</code>, and <code>upload</code>.</p>
 <p>Guard-rails against the usual WebBridge failure modes:</p>
 <ul>
 <li><strong>Tab budget:</strong> a <code>navigate</code> with <code>new_tab</code> is refused when the session already
@@ -3135,9 +3160,18 @@ sessions and returns an accessibility snapshot with <code>@e</code> refs.</p>
 <li><strong>Auto-close:</strong> agent-created sessions are closed when the run finishes.</li>
 <li><strong>Session isolation:</strong> every subagent gets a derived session name, so parallel
   subagents do not fight over one tab group.</li>
+<li><strong>Network policy:</strong> <code>network_enabled: false</code> blocks external navigation while
+  keeping <code>localhost</code>, private IPs, <code>file:</code>, <code>data:</code>, and <code>about:</code> usable.
+  <code>allowed_domains</code> is an allowlist (subdomains included) and <code>blocked_domains</code>
+  is a denylist. This is a navigation guard, not a network sandbox: it prevents
+  the agent from browsing the open internet to look up answers, but a page that
+  is already loaded or a shell command can still reach the network.</li>
 </ul>
-<p><code>backend: browser_use</code> is reserved. This build does not bundle browser-use;
-WebBridge is the supported backend because it controls the real browser.</p>
+<p>Install the browser-use extra with:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"mini-swe-agent[browser-use] @ git+https://github.com/BenWongCityuCS/mini-swe-agent-v2.git@main"</span>
+</code></pre></div>
+<p>browser-use needs Playwright and a Chrome/Chromium installation. If it cannot
+find a browser, set <code>browser_use.executable_path</code> or <code>browser_use.cdp_url</code>.</p>
 <h2 id="vision">Vision</h2>
 <p>Some models have no vision or weak vision. The <code>Vision</code> tool sends an image to a
 separate model and returns text; the image never enters the main context.</p>
