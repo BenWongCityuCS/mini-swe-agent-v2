@@ -2664,6 +2664,7 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.config</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">AutomationsConfig</span><span class="p">,</span>
     <span class="n">BrowserConfig</span><span class="p">,</span>
+    <span class="n">ContextConfig</span><span class="p">,</span>
     <span class="n">McpConfig</span><span class="p">,</span>
     <span class="n">PluginsConfig</span><span class="p">,</span>
     <span class="n">PromptsConfig</span><span class="p">,</span>
@@ -2695,6 +2696,8 @@
 <span class="w">    </span><span class="sd">"""Save the trajectory to this path."""</span>
     <span class="n">compaction</span><span class="p">:</span> <span class="n">CompactionConfig</span> <span class="o">=</span> <span class="n">CompactionConfig</span><span class="p">()</span>
 <span class="w">    </span><span class="sd">"""Conversation compaction settings."""</span>
+    <span class="n">context</span><span class="p">:</span> <span class="n">ContextConfig</span> <span class="o">=</span> <span class="n">ContextConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""ZCode-style section budgets, meta-user injection, and system reminders."""</span>
     <span class="n">workspace</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
 <span class="w">    </span><span class="sd">"""Root used to resolve extension paths. Defaults to the environment cwd."""</span>
     <span class="n">skills</span><span class="p">:</span> <span class="n">SkillsConfig</span> <span class="o">=</span> <span class="n">SkillsConfig</span><span class="p">()</span>
@@ -2764,6 +2767,11 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_vision</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_file_tracker</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mounted_prompts</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">resolve_context_limit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">model_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">context_limit</span><span class="p">)</span>
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">enabled</span>
@@ -2813,6 +2821,7 @@
         <span class="n">prompt_config</span><span class="o">.</span><span class="n">dirs</span> <span class="o">=</span> <span class="p">[</span><span class="o">*</span><span class="n">prompt_config</span><span class="o">.</span><span class="n">dirs</span><span class="p">,</span> <span class="o">*</span><span class="n">plugin_prompt_dirs</span><span class="p">]</span>
         <span class="k">if</span> <span class="n">prompt_config</span><span class="o">.</span><span class="n">files</span> <span class="ow">or</span> <span class="n">prompt_config</span><span class="o">.</span><span class="n">dirs</span><span class="p">:</span>
             <span class="n">mounted</span><span class="p">,</span> <span class="n">section</span> <span class="o">=</span> <span class="n">load_mounted_prompts</span><span class="p">(</span><span class="n">prompt_config</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_mounted_prompts</span> <span class="o">=</span> <span class="n">mounted</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_mounted_prompt_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">prompt</span><span class="o">.</span><span class="n">path</span> <span class="k">for</span> <span class="n">prompt</span> <span class="ow">in</span> <span class="n">mounted</span><span class="p">]</span>
             <span class="k">if</span> <span class="n">section</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">_prompt_sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">section</span><span class="p">)</span>
@@ -2902,7 +2911,23 @@
             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mcp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mcp</span><span class="o">.</span><span class="n">diagnostics</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"MCP diagnostics: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="s2">"; "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mcp</span><span class="o">.</span><span class="n">diagnostics</span><span class="p">))</span>
 
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context</span><span class="w"> </span><span class="kn">import</span> <span class="n">ContextBuilder</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="o">=</span> <span class="n">ContextBuilder</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">context</span><span class="p">,</span>
+                <span class="n">base_prompt</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span>
+                <span class="n">workspace</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span>
+                <span class="n">model_name</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="s2">"config"</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="s2">"model_name"</span><span class="p">,</span> <span class="s2">"unknown"</span><span class="p">),</span>
+                <span class="n">mounted_prompts</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_mounted_prompts</span><span class="p">,</span>
+                <span class="n">skills</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_skills</span><span class="p">,</span>
+                <span class="n">skills_max_description_chars</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">skills</span><span class="o">.</span><span class="n">max_description_chars</span><span class="p">,</span>
+                <span class="n">profiles</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_profiles</span><span class="p">,</span>
+            <span class="p">)</span>
+
     <span class="k">def</span><span class="w"> </span><span class="nf">_system_content</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">system_content</span>
         <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">system_template</span><span class="p">)]</span>
         <span class="n">parts</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">section</span> <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prompt_sections</span> <span class="k">if</span> <span class="n">section</span><span class="p">)</span>
         <span class="k">return</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">part</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span> <span class="k">if</span> <span class="n">part</span><span class="p">)</span>
@@ -2957,9 +2982,19 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">extra_template_vars</span> <span class="o">|=</span> <span class="p">{</span><span class="s2">"task"</span><span class="p">:</span> <span class="n">task</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">}</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span> <span class="o">=</span> <span class="n">CompactionState</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">base_prompt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">system_template</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">build</span><span class="p">()</span>
+        <span class="n">task_content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">instance_template</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="p">:</span>
+            <span class="n">task_content</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"&lt;meta_user&gt;</span><span class="se">\n</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">meta_user_content</span><span class="si">}</span><span class="se">\n</span><span class="s2">&lt;/meta_user&gt;</span><span class="se">\n\n</span><span class="si">{</span><span class="n">task_content</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">add_messages</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_system_content</span><span class="p">()),</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_render_template</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">instance_template</span><span class="p">)),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">task_content</span><span class="p">),</span>
         <span class="p">)</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
@@ -3036,35 +3071,64 @@
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_messages_for_model</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">:</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span>
-        <span class="k">return</span> <span class="p">[</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
-            <span class="n">summary_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">),</span>
-            <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="p">:],</span>
-        <span class="p">]</span>
+            <span class="n">messages</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">messages</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                <span class="n">summary_message</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">),</span>
+                <span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="p">:],</span>
+            <span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">system_reminders</span><span class="p">:</span>
+            <span class="n">reminder_sections</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">build_reminders</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_todo</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="p">,</span>
+                <span class="n">microcompacted</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">reminder</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_builder</span><span class="o">.</span><span class="n">reminder_content</span><span class="p">(</span><span class="n">reminder_sections</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">reminder</span><span class="p">:</span>
+                <span class="n">messages</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">reminder</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">messages</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_compact_once</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-        <span class="n">boundary</span> <span class="o">=</span> <span class="n">compactable_boundary</span><span class="p">(</span>
+        <span class="n">compact_boundary</span> <span class="o">=</span> <span class="n">compactable_boundary</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">keep_tokens</span>
         <span class="p">)</span>
-        <span class="k">if</span> <span class="n">boundary</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">compact_boundary</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="kc">False</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context.compact.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span>
+
+        <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_template</span>
+        <span class="n">input_limit</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">)</span>
         <span class="n">boundary</span> <span class="o">=</span> <span class="n">fitting_summary_boundary</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span><span class="p">,</span>
-            <span class="n">boundary</span><span class="p">,</span>
+            <span class="n">compact_boundary</span><span class="p">,</span>
             <span class="n">previous_summary</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span>
-            <span class="n">template</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_template</span><span class="p">,</span>
-            <span class="n">input_limit</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">),</span>
+            <span class="n">template</span><span class="o">=</span><span class="n">template</span><span class="p">,</span>
+            <span class="n">input_limit</span><span class="o">=</span><span class="n">input_limit</span><span class="p">,</span>
         <span class="p">)</span>
+        <span class="k">if</span> <span class="n">boundary</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">template</span> <span class="o">!=</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span><span class="p">:</span>
+            <span class="c1"># A very long summary prompt can exceed a small model's input budget.</span>
+            <span class="c1"># Fall back to the compact template before giving up.</span>
+            <span class="n">template</span> <span class="o">=</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span>
+            <span class="n">boundary</span> <span class="o">=</span> <span class="n">fitting_summary_boundary</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span><span class="p">,</span>
+                <span class="n">compact_boundary</span><span class="p">,</span>
+                <span class="n">previous_summary</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span>
+                <span class="n">template</span><span class="o">=</span><span class="n">template</span><span class="p">,</span>
+                <span class="n">input_limit</span><span class="o">=</span><span class="n">input_limit</span><span class="p">,</span>
+            <span class="p">)</span>
         <span class="k">if</span> <span class="n">boundary</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="kc">False</span>
         <span class="n">before</span> <span class="o">=</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span>
         <span class="n">prompt</span> <span class="o">=</span> <span class="n">render_summary_prompt</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_template</span><span class="p">,</span>
+            <span class="n">template</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="p">:</span> <span class="n">boundary</span><span class="p">],</span>
         <span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span><span class="p">:</span>
+            <span class="n">prompt</span> <span class="o">+=</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">Additional Instructions:</span><span class="se">\n</span><span class="s2">"</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span>
         <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate_text</span><span class="p">(</span>
             <span class="p">[</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
@@ -3095,16 +3159,64 @@
         <span class="k">return</span> <span class="kc">True</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_compact_until_fit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context.compact</span><span class="w"> </span><span class="kn">import</span> <span class="n">maybe_microcompact</span><span class="p">,</span> <span class="n">should_compact</span>
+
         <span class="n">compacted</span> <span class="o">=</span> <span class="kc">False</span>
-        <span class="n">threshold</span> <span class="o">=</span> <span class="n">compaction_threshold</span><span class="p">(</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">buffer</span><span class="p">,</span> <span class="n">requested_output_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">)</span>
-        <span class="p">)</span>
-        <span class="k">if</span> <span class="n">reason</span> <span class="o">==</span> <span class="s2">"overflow"</span> <span class="ow">and</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span> <span class="o">&lt;=</span> <span class="n">threshold</span><span class="p">:</span>
+        <span class="n">output_tokens</span> <span class="o">=</span> <span class="n">requested_output_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">)</span>
+        <span class="n">threshold</span> <span class="o">=</span> <span class="n">compaction_threshold</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">buffer</span><span class="p">,</span> <span class="n">output_tokens</span><span class="p">)</span>
+        <span class="n">token_count</span> <span class="o">=</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span>
+
+        <span class="c1"># Cheap first pass: clear old tool results before paying for a summary.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">microcompact</span> <span class="ow">and</span> <span class="n">token_count</span> <span class="o">&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">threshold</span> <span class="o">*</span> <span class="mf">0.9</span><span class="p">):</span>
+            <span class="n">updated</span><span class="p">,</span> <span class="n">saved</span><span class="p">,</span> <span class="n">cleared</span> <span class="o">=</span> <span class="n">maybe_microcompact</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span>
+                <span class="n">keep_recent</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">microcompact_keep_recent</span><span class="p">,</span>
+                <span class="n">min_token_savings</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">microcompact_min_savings</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">saved</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="n">updated</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="s2">"microcompact cleared </span><span class="si">%d</span><span class="s2"> old tool result(s), saving ~</span><span class="si">%d</span><span class="s2"> tokens"</span><span class="p">,</span> <span class="n">cleared</span><span class="p">,</span> <span class="n">saved</span>
+                <span class="p">)</span>
+                <span class="n">token_count</span> <span class="o">=</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span>
+
+        <span class="k">if</span> <span class="n">reason</span> <span class="o">==</span> <span class="s2">"auto"</span><span class="p">:</span>
+            <span class="n">decision</span> <span class="o">=</span> <span class="n">should_compact</span><span class="p">(</span>
+                <span class="n">token_count</span><span class="o">=</span><span class="n">token_count</span><span class="p">,</span>
+                <span class="n">context_limit</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span><span class="p">,</span>
+                <span class="n">buffer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">buffer</span><span class="p">,</span>
+                <span class="n">output_tokens</span><span class="o">=</span><span class="n">output_tokens</span><span class="p">,</span>
+                <span class="n">consecutive_failures</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span><span class="p">,</span>
+                <span class="n">max_consecutive_failures</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">max_consecutive_failures</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">decision</span><span class="o">.</span><span class="n">should_compact</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">compacted</span>
+
+        <span class="k">if</span> <span class="n">reason</span> <span class="o">==</span> <span class="s2">"overflow"</span> <span class="ow">and</span> <span class="n">token_count</span> <span class="o">&lt;=</span> <span class="n">threshold</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_check_limits</span><span class="p">()</span>
             <span class="n">compacted</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compact_once</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
         <span class="k">while</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_check_limits</span><span class="p">()</span>
-            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compact_once</span><span class="p">(</span><span class="n">reason</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">did_compact</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compact_once</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span>
+                    <span class="s2">"compaction failed (</span><span class="si">%d</span><span class="s2">/</span><span class="si">%d</span><span class="s2">)"</span><span class="p">,</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span><span class="p">,</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">max_consecutive_failures</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">max_consecutive_failures</span> <span class="o">&gt;</span> <span class="mi">0</span>
+                    <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">max_consecutive_failures</span>
+                <span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"compaction circuit breaker open; continuing without compaction"</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">compacted</span>
+                <span class="k">raise</span>
+            <span class="k">if</span> <span class="n">did_compact</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">did_compact</span><span class="p">:</span>
                 <span class="k">break</span>
             <span class="n">compacted</span> <span class="o">=</span> <span class="kc">True</span>
         <span class="k">return</span> <span class="n">compacted</span>
@@ -3182,6 +3294,12 @@
                     <span class="k">else</span> <span class="p">[]</span>
                 <span class="p">),</span>
                 <span class="s2">"automation_dirs"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_automation_dirs</span><span class="p">),</span>
+            <span class="p">},</span>
+            <span class="s2">"context"</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">"enabled"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">enabled</span><span class="p">,</span>
+                <span class="s2">"microcompacted"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_microcompacted</span><span class="p">,</span>
+                <span class="s2">"compaction_failures"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compaction_failures</span><span class="p">,</span>
+                <span class="o">**</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span><span class="o">.</span><span class="n">stats</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_context_result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{}),</span>
             <span class="p">},</span>
             <span class="s2">"trajectory_format"</span><span class="p">:</span> <span class="s2">"mini-swe-agent-1.1"</span><span class="p">,</span>
         <span class="p">}</span>

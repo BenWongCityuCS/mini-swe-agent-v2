@@ -730,6 +730,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#context-sections-and-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context sections and compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2733,6 +2744,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#context-sections-and-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context sections and compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skills" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2939,6 +2961,71 @@ they never contaminate the coordinator's state.</p>
 <span class="w">    </span><span class="nt">edit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">todo_persist</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
+<h2 id="context-sections-and-compaction">Context sections and compaction</h2>
+<p>The context layer follows ZCode's design instead of concatenating everything
+into one system prompt:</p>
+<ul>
+<li><strong>Sections with budgets.</strong> Each piece (base prompt, environment, date, mounted
+  prompts, skills, subagent profiles, todo list, compaction checkpoint) is a
+  section with a token budget, a priority, a cache hint, and a target.
+  Over-budget sections use a cheaper compact form (for skills/profiles: a
+  names-only list) before being truncated.</li>
+<li><strong>Total budget.</strong> <code>max_total_tokens</code> caps the assembled context. When it is
+  exceeded, low-priority sections are compacted, truncated, or dropped; the base
+  prompt is always kept.</li>
+<li><strong>meta-user injection.</strong> Skills and subagent profiles are sent as a
+  <code>&lt;meta_user&gt;</code> prefix on the first user message instead of the system prompt.
+  This keeps the system prompt stable for provider prompt caching and matches
+  ZCode's <code>injectionTarget: "meta_user"</code>.</li>
+<li><strong>System reminders.</strong> The current todo list, the active compaction checkpoint,
+  and a microcompact notice are injected as an ephemeral
+  <code>&lt;system-reminder&gt;...&lt;/system-reminder&gt;</code> user message on every model call. They
+  are <strong>not</strong> stored in the conversation history, so they do not accumulate.</li>
+<li><strong>Compaction subsystem.</strong></li>
+<li><strong>Microcompact</strong> (cheap): when usage crosses ~90% of the threshold, old
+     tool results are replaced with <code>[Old tool result content cleared to save
+     context]</code>, keeping the most recent <code>microcompact_keep_recent</code> results.</li>
+<li><strong>Full compaction</strong>: if still over the threshold, older conversation
+     groups are summarized into a checkpoint with a ZCode-style prompt
+     (analysis + summary sections), keeping the recent <code>keep_tokens</code>.</li>
+<li><strong>Circuit breaker</strong>: after <code>max_consecutive_failures</code> summary failures the
+     agent stops retrying compaction for the run instead of looping.</li>
+<li>If the summary prompt itself does not fit a small model's input budget,
+     the engine falls back to a minimal template.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">context</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">max_total_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40000</span>
+<span class="w">    </span><span class="nt">max_section_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<span class="w">    </span><span class="nt">meta_user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">system_reminders</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">reminder_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
+<span class="w">    </span><span class="nt">env_info</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">current_date</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">section_budgets</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<span class="w">      </span><span class="nt">subagents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<span class="w">      </span><span class="nt">prompts</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<span class="w">      </span><span class="nt">todo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
+<span class="w">      </span><span class="nt">compaction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span>
+
+<span class="w">  </span><span class="nt">compaction</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">auto</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">context_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">299200</span><span class="w">   </span><span class="c1"># required for self-hosted models</span>
+<span class="w">    </span><span class="nt">keep_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15000</span>
+<span class="w">    </span><span class="nt">buffer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<span class="w">    </span><span class="nt">summary_max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4096</span>
+<span class="w">    </span><span class="nt">microcompact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">microcompact_keep_recent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">    </span><span class="nt">microcompact_min_savings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
+<span class="w">    </span><span class="nt">max_consecutive_failures</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</code></pre></div>
+<p><code>context.enabled</code> is off by default so a stock config keeps the upstream
+behaviour; <code>extensions.yaml</code> turns it on. Trajectories record the assembled
+sections under <code>context</code> (tokens, budgets, dropped sections) plus the
+compaction/microcompact counters.</p>
 <h2 id="skills">Skills</h2>
 <p>A skill is <code>&lt;dir&gt;/&lt;name&gt;/SKILL.md</code> or <code>&lt;dir&gt;/&lt;name&gt;.md</code> with optional YAML
 frontmatter:</p>
