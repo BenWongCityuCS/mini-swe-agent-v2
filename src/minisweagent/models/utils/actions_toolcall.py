@@ -28,15 +28,24 @@ BASH_TOOL = {
 
 
 def parse_toolcall_actions(
-    tool_calls: list, *, format_error_template: str, template_kwargs: dict | None = None
+    tool_calls: list,
+    *,
+    format_error_template: str,
+    template_kwargs: dict | None = None,
+    allowed_tools: set[str] | None = None,
 ) -> list[dict]:
     """Parse tool calls from the response. Raises FormatError if unknown tool or invalid args.
 
     ``template_kwargs`` are extra variables exposed to ``format_error_template`` (e.g.
     ``{"finish_reason": ...}`` so a template can distinguish a real format mistake from a
     ``max_tokens`` truncation).
+
+    ``allowed_tools`` is the set of tool names offered to the model (``bash`` plus any
+    extension tools). When omitted, only ``bash`` is accepted.
     """
     template_kwargs = template_kwargs or {}
+    if allowed_tools is None:
+        allowed_tools = {"bash"}
     if not tool_calls:
         raise FormatError(
             {
@@ -54,13 +63,16 @@ def parse_toolcall_actions(
     for tool_call in tool_calls:
         error_msg = ""
         args = {}
+        name = tool_call.function.name
         try:
             args = json.loads(tool_call.function.arguments)
         except Exception as e:
             error_msg = f"Error parsing tool call arguments: {e}."
-        if tool_call.function.name != "bash":
-            error_msg += f"Unknown tool '{tool_call.function.name}'."
-        if not isinstance(args, dict) or "command" not in args:
+        if allowed_tools is not None and name not in allowed_tools:
+            error_msg += f"Unknown tool '{name}'."
+        if not isinstance(args, dict):
+            error_msg += f"Tool '{name}' arguments must be a JSON object."
+        elif name == "bash" and "command" not in args:
             error_msg += "Missing 'command' argument in bash tool call."
         if error_msg:
             raise FormatError(
@@ -72,7 +84,10 @@ def parse_toolcall_actions(
                     "extra": {"interrupt_type": "FormatError"},
                 }
             )
-        actions.append({"command": args["command"], "tool_call_id": tool_call.id})
+        if name == "bash":
+            actions.append({"command": args["command"], "tool_call_id": tool_call.id})
+        else:
+            actions.append({"tool": name, "args": args, "tool_call_id": tool_call.id})
     return actions
 
 

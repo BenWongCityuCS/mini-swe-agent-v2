@@ -1,0 +1,145 @@
+# Second-generation defaults. Layer this on top of a base config:
+#
+#   mini -c mini.yaml -c extensions.yaml --task "..."
+#
+# See docs/usage/extensions.md for the full reference. Delete the blocks you
+# do not need; the base config alone still behaves like upstream v2.
+
+agent:
+  # ZCode-style context assembly: sections with per-section budgets, meta-user
+  # injection, ephemeral system reminders, and the compaction subsystem.
+  context:
+    enabled: true
+    max_total_tokens: 40000
+    max_section_tokens: 20000
+    meta_user: true
+    system_reminders: true
+    reminder_tokens: 2000
+    env_info: true
+    current_date: true
+    section_budgets:
+      skills: 20000
+      subagents: 20000
+      prompts: 20000
+      todo: 2000
+      compaction: 8000
+
+  # Conversation compaction. Enable it for long runs; set context_limit
+  # explicitly for self-hosted models that litellm does not know.
+  # compaction:
+  #   enabled: true
+  #   auto: true
+  #   context_limit: 299200
+  #   keep_tokens: 15000
+  #   buffer: 20000
+  #   summary_max_tokens: 4096
+  #   microcompact: true
+  #   microcompact_keep_recent: 5
+  #   microcompact_min_savings: 256
+  #   max_consecutive_failures: 3
+
+  # Modern built-in tools.
+  tools:
+    read_only: true
+    todo: true
+    edit: true
+    todo_persist: true
+
+  skills:
+    enabled: true
+    dirs:
+      - "./skills"
+      - "~/.mini-swe-agent/skills"
+    max_description_chars: 250
+    max_index_chars: 20000
+    max_bytes: 100000
+
+  subagents:
+    enabled: true
+    profile_dirs:
+      - "./agents"
+      - "~/.mini-swe-agent/agents"
+    max_depth: 1
+    default_type: general-purpose
+    inherit_skills: true
+    step_limit: 0
+    max_result_chars: 20000
+    # Global across every agent in this process.
+    max_concurrent: 3
+    parallel_task_calls: true
+    # Default thinking effort for subagents; a Task call can override it.
+    # Omit to inherit whatever the model payload/config already says.
+    # reasoning_effort: high
+
+  mcp:
+    enabled: false
+    # JSON/YAML with {"mcpServers": {...}} or inline servers below.
+    config_file: "./mcp.json"
+    servers: {}
+    timeout_seconds: 60
+    max_output_chars: 50000
+    tool_prefix: mcp
+    required: false
+
+  plugins:
+    enabled: true
+    dirs:
+      - "./plugins"
+      - "~/.mini-swe-agent/plugins"
+    paths: []
+
+  automations:
+    enabled: true
+    dirs:
+      - "./automations"
+      - "~/.mini-swe-agent/automations"
+
+  prompts:
+    files:
+      - "AGENTS.md"
+    dirs: []
+    required: false
+    tag: mounted_instructions
+    header: Mounted instructions
+
+  browser:
+    enabled: false
+    # webbridge = user's real Chrome/Edge (login sessions)
+    # browser_use = Playwright browser
+    # auto = prefer WebBridge when it is ready, otherwise browser-use
+    backend: webbridge
+    fallback: true
+    daemon_url: "http://127.0.0.1:10086/command"
+    status_url: "http://127.0.0.1:10086/status"
+    # Optional tab-limit proxy (per-session 3 + global 12 by default).
+    proxy_url: "http://127.0.0.1:11086/command"
+    prefer_proxy: true
+    session: null
+    group_title: null
+    max_tabs_per_session: 3
+    auto_close_on_finish: true
+    timeout_seconds: 120
+    max_output_chars: 30000
+    # false blocks external navigation (localhost/private/file/data stay usable).
+    # Use allowed_domains for a tight allowlist, or blocked_domains for a denylist.
+    network_enabled: true
+    allowed_domains: []
+    blocked_domains: []
+    allow_localhost: true
+    browser_use:
+      headless: false
+      executable_path: null
+      # Persistent Playwright profile. Do not point this at a running Chrome profile.
+      user_data_dir: null
+      # Or attach to an existing Chrome: cdp_url: "http://127.0.0.1:9222"
+      cdp_url: null
+      keep_alive: true
+
+  vision:
+    enabled: false
+    # A vision-capable model, ideally different from the main model.
+    model: null
+    model_kwargs: {}
+    question: "Describe this image in detail, including any visible text."
+    max_output_chars: 4000
+    auto_describe_screenshots: true

@@ -6,6 +6,7 @@ There are three modes:
 - yolo: commands issued by the LM are executed immediately without confirmation
 """
 
+import json
 import re
 import sys
 from typing import Literal, NoReturn
@@ -124,12 +125,15 @@ class InteractiveAgent(DefaultAgent):
     def execute_actions(self, message: dict) -> list[dict]:
         # Override to handle user confirmation and confirm_exit, with try/finally to preserve partial outputs
         actions = message.get("extra", {}).get("actions", [])
-        commands = [action["command"] for action in actions]
+        commands = [
+            action.get("command") or f"{action.get('tool')}({json.dumps(action.get('args') or {})})"
+            for action in actions
+        ]
         outputs = []
         try:
             self._ask_confirmation_or_interrupt(commands)
             for action in actions:
-                outputs.append(self.env.execute(action))
+                outputs.append(self._execute_action(action))
         except Submitted as e:
             self._check_for_new_task_or_submit(e)
         finally:

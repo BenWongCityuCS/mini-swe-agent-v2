@@ -31,6 +31,8 @@ class LitellmModelConfig(BaseModel):
     """Model name. Highly recommended to include the provider in the model name, e.g., `anthropic/claude-sonnet-4-5-20250929`."""
     model_kwargs: dict[str, Any] = {}
     """Additional arguments passed to the API."""
+    extra_tools: list[dict] = []
+    """Additional OpenAI-style tool specs (skills, subagents, MCP)."""
     litellm_model_registry: Path | str | None = os.getenv("LITELLM_MODEL_REGISTRY_PATH")
     """Model registry for cost tracking and model metadata. See the local model guide (https://mini-swe-agent.com/latest/models/local_models/) for more details."""
     set_cache_control: Literal["default_end"] | None = None
@@ -63,12 +65,19 @@ class LitellmModel:
         if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
             litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
 
+    def set_extra_tools(self, tools: list[dict]) -> None:
+        """Install additional tool specs (called by the agent extension layer)."""
+        self.config.extra_tools = list(tools)
+
+    def _tool_specs(self) -> list[dict]:
+        return [BASH_TOOL, *self.config.extra_tools]
+
     def _query(self, messages: list[dict[str, str]], *, use_tools: bool = True, **kwargs):
         try:
             return litellm.completion(
                 model=self.config.model_name,
                 messages=messages,
-                **request_kwargs(self.config.model_kwargs, kwargs, [BASH_TOOL] if use_tools else None),
+                **request_kwargs(self.config.model_kwargs, kwargs, self._tool_specs() if use_tools else None),
             )
         except litellm.exceptions.ContextWindowExceededError as e:
             raise ContextWindowExceeded(str(e)) from e
@@ -143,6 +152,7 @@ class LitellmModel:
             tool_calls,
             format_error_template=self.config.format_error_template,
             template_kwargs={"finish_reason": response.choices[0].finish_reason},
+            allowed_tools={"bash", *[spec["function"]["name"] for spec in self.config.extra_tools]},
         )
 
     def format_message(self, **kwargs) -> dict:

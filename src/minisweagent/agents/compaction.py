@@ -7,18 +7,10 @@ import litellm
 from jinja2 import StrictUndefined, Template
 from pydantic import BaseModel, Field
 
+from minisweagent.context.compact.prompt import build_summary_template
 from minisweagent.models.utils.content_string import get_content_string
 
-DEFAULT_SUMMARY_TEMPLATE = """Create a concise checkpoint of the conversation below.
-Preserve the objective, important technical details, files changed or inspected, commands and results,
-decisions, failures, blockers, and the next actions. Do not add information that is not present.
-
-Previous checkpoint:
-{{ previous_summary or "(none)" }}
-
-Conversation to incorporate:
-{{ transcript }}
-"""
+DEFAULT_SUMMARY_TEMPLATE = build_summary_template()
 
 
 class CompactionConfig(BaseModel):
@@ -29,6 +21,14 @@ class CompactionConfig(BaseModel):
     buffer: int = Field(default=20_000, ge=0)
     summary_max_tokens: int = Field(default=4_096, gt=0)
     summary_template: str = DEFAULT_SUMMARY_TEMPLATE
+    summary_instructions: str = ""
+    """Extra instructions appended to the summary prompt."""
+    microcompact: bool = True
+    """Clear old tool results before falling back to a full summary."""
+    microcompact_keep_recent: int = Field(default=5, ge=0)
+    microcompact_min_savings: int = Field(default=256, ge=0)
+    max_consecutive_failures: int = Field(default=3, ge=0)
+    """Stop retrying summaries after this many consecutive failures."""
 
 
 @dataclass
