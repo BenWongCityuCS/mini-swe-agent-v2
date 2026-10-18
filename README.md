@@ -1,3 +1,34 @@
+> [!IMPORTANT]
+> **Unofficial fork: mini-swe-agent-v2**
+>
+> This repository is an unofficial fork of
+> [SWE-agent/mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) at
+> v2.4.6. It adds the still-unmerged conversation-compaction pull request
+> [#948](https://github.com/SWE-agent/mini-swe-agent/pull/948) by
+> [@wasiahmad](https://github.com/wasiahmad). It is **not affiliated with or
+> endorsed by** the upstream maintainers. See [NOTICE.md](NOTICE.md).
+>
+> Compaction is opt-in:
+>
+> ```yaml
+> agent:
+>   compaction:
+>     enabled: true
+>     auto: true
+>     context_limit: 299200   # required for self-hosted models litellm doesn't know
+>     keep_tokens: 15000
+>     buffer: 20000
+>     summary_max_tokens: 4096
+> ```
+>
+> Install this fork:
+>
+> ```bash
+> pip install "mini-swe-agent @ git+https://github.com/BenWongCityuCS/mini-swe-agent-v2.git"
+> ```
+>
+> The rest of this file is the upstream README.
+
 <div align="center">
 <a href="https://mini-swe-agent.com/latest/"><img src="https://github.com/SWE-agent/mini-swe-agent/raw/main/docs/assets/mini-swe-agent-banner.svg" alt="mini-swe-agent banner" style="height: 7em"/></a>
 </div>
