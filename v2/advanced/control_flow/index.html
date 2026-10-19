@@ -3395,7 +3395,14 @@
         <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context.compact.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span>
 
         <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_template</span>
-        <span class="n">input_limit</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">)</span>
+        <span class="n">safety</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_safety_tokens</span><span class="p">,</span>
+            <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">//</span> <span class="mi">10</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">available</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">context_limit</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span> <span class="o">-</span> <span class="n">safety</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_input_tokens</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">available</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">available</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_input_tokens</span><span class="p">)</span>
+        <span class="n">input_limit</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">available</span><span class="p">)</span>
         <span class="n">boundary</span> <span class="o">=</span> <span class="n">fitting_summary_boundary</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span><span class="p">,</span>
@@ -3432,24 +3439,33 @@
         <span class="p">)</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span><span class="p">:</span>
             <span class="n">prompt</span> <span class="o">+=</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">Additional Instructions:</span><span class="se">\n</span><span class="s2">"</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span>
-        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate_text</span><span class="p">(</span>
-            <span class="p">[</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
-                    <span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="s2">"Return only the requested conversation checkpoint, without commentary."</span>
-                <span class="p">),</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">prompt</span><span class="p">),</span>
-            <span class="p">],</span>
-            <span class="n">max_tokens</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">,</span>
-        <span class="p">)</span>
+        <span class="n">generation_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"max_tokens"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_reasoning_effort</span><span class="p">:</span>
+            <span class="n">generation_kwargs</span><span class="p">[</span><span class="s2">"reasoning_effort"</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_reasoning_effort</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">n_compaction_calls</span> <span class="o">+=</span> <span class="mi">1</span>
-        <span class="n">cost</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">"cost"</span><span class="p">]</span>
+        <span class="n">cost</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">summary</span> <span class="o">=</span> <span class="s2">""</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate_text</span><span class="p">(</span>
+                <span class="p">[</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
+                        <span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span>
+                        <span class="n">content</span><span class="o">=</span><span class="s2">"Return only the requested conversation checkpoint, without commentary."</span><span class="p">,</span>
+                    <span class="p">),</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">prompt</span><span class="p">),</span>
+                <span class="p">],</span>
+                <span class="o">**</span><span class="n">generation_kwargs</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">cost</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cost"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+            <span class="n">summary</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"text"</span><span class="p">,</span> <span class="s2">""</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="c1"># A provider error or a context/tokenizer mismatch must not kill a</span>
+            <span class="c1"># long run. Continue with a bounded local checkpoint.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction summary call failed: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">cost</span> <span class="o">+=</span> <span class="n">cost</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">summary</span> <span class="o">:=</span> <span class="n">result</span><span class="p">[</span><span class="s2">"text"</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()):</span>
-            <span class="c1"># A reasoning-only or truncated response can leave content empty.</span>
-            <span class="c1"># Do not kill a long run for a summarizer hiccup: keep a bounded,</span>
-            <span class="c1"># deterministic checkpoint and continue.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">summary</span><span class="p">:</span>
             <span class="n">summary</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fallback_summary</span><span class="p">(</span><span class="n">boundary</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction model returned an empty checkpoint; using a local fallback summary"</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction model returned no checkpoint; using a local fallback summary"</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span> <span class="o">=</span> <span class="n">summary</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="o">=</span> <span class="n">boundary</span>
         <span class="n">after</span> <span class="o">=</span> <span class="n">estimate_tokens</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_messages_for_model</span><span class="p">())</span>

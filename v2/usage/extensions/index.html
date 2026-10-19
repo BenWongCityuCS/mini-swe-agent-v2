@@ -3256,6 +3256,14 @@ into one system prompt:</p>
      agent stops retrying compaction for the run instead of looping.</li>
 <li>If the summary prompt itself does not fit a small model's input budget,
      the engine falls back to a minimal template.</li>
+<li><strong>Bounded summary input.</strong> <code>summary_input_tokens</code> caps how much transcript
+     one summary call sees (default 60000); long histories are compacted in a
+     few smaller checkpoints instead of one near-limit request. Reasoning models
+     can otherwise spend the whole <code>summary_max_tokens</code> budget on hidden
+     reasoning and return empty content.</li>
+<li><strong>Fallback checkpoint.</strong> If the summary call fails, hits the context limit,
+     or returns no text, the engine writes a bounded local checkpoint from the
+     old messages and continues instead of killing the run.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">context</span><span class="p">:</span>
@@ -3281,6 +3289,9 @@ into one system prompt:</p>
 <span class="w">    </span><span class="nt">keep_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15000</span>
 <span class="w">    </span><span class="nt">buffer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
 <span class="w">    </span><span class="nt">summary_max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4096</span>
+<span class="w">    </span><span class="nt">summary_input_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60000</span><span class="w">   </span><span class="c1"># per-summary transcript cap (0 = full window)</span>
+<span class="w">    </span><span class="nt">summary_safety_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8192</span><span class="w">   </span><span class="c1"># tokenizer/template headroom</span>
+<span class="w">    </span><span class="c1"># summary_reasoning_effort: low</span>
 <span class="w">    </span><span class="nt">microcompact</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">microcompact_keep_recent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
 <span class="w">    </span><span class="nt">microcompact_min_savings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256</span>
