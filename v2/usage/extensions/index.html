@@ -11,7 +11,7 @@
         <link rel="prev" href="../config/">
       
       
-        <link rel="next" href="../swebench/">
+        <link rel="next" href="../workflow/">
       
       
         
@@ -553,6 +553,8 @@
       
         
       
+        
+      
     
     
     
@@ -851,6 +853,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#browser-webbridge-or-browser-use" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -909,6 +922,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2920,6 +2961,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#browser-webbridge-or-browser-use" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3408,11 +3460,36 @@ mini-automation<span class="w"> </span>serve<span class="w"> </span>--interval<s
 <p>State (last run, status, count) lives in
 <code>.mini-swe-agent/automations-state.json</code>; each run writes a trajectory and a log
 under <code>~/.mini-swe-agent/automations/runs/&lt;name&gt;/</code>.</p>
+<h2 id="workflows">Workflows</h2>
+<p>A workflow is a durable, multi-phase run with a scheduled DAG, typed subagent
+results, artifacts, a journal, and resume. It is a Python port of ZCode's
+dynamic-workflow core; the TypeScript authoring facade and sandbox are not
+included.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">agent</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">workflow</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">dirs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"./workflows"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"~/.mini-swe-agent/workflows"</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">run_dir</span><span class="p">:</span><span class="w"> </span><span class="s">".mini-swe-agent/workflow-runs"</span>
+<span class="w">    </span><span class="nt">default_definition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">expert</span>
+<span class="w">    </span><span class="nt">max_concurrent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="w">    </span><span class="nt">max_retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</code></pre></div>
+<p>The built-in <code>expert</code> workflow runs clarify, task analysis, architecture
+decomposition, environment setup, meta prompt, a scheduled execution DAG, a
+final critic, and a report. Tools: <code>WorkflowCreate</code>, <code>WorkflowList</code>,
+<code>WorkflowRun</code>, <code>WorkflowStatus</code>. Workflow subagents additionally receive
+<code>submit_result</code> (validated against a JSON schema) and <code>escalate</code>.</p>
+<div class="highlight"><pre><span></span><code>mini-workflow<span class="w"> </span>list
+mini-workflow<span class="w"> </span>status<span class="w"> </span>&lt;run-id&gt;
+mini-workflow<span class="w"> </span>run<span class="w"> </span>expert<span class="w"> </span>--task<span class="w"> </span><span class="s2">"..."</span><span class="w"> </span>-c<span class="w"> </span>mini.yaml<span class="w"> </span>-c<span class="w"> </span>extensions.yaml
+</code></pre></div>
+<p>See <a href="../workflow/">Workflows</a> for the definition schema, typed results, and
+resume semantics.</p>
 <h2 id="browser-webbridge-or-browser-use">Browser (WebBridge or browser-use)</h2>
 <p>The browser tool has two interchangeable backends; the user picks one with
 <code>agent.browser.backend</code>:</p>
 <ul>
-<li><strong><code>webbridge</code></strong> — <a href="https://github.com/BenWongCityuCS/kimi-webbridge-enhanced">Kimi WebBridge</a>
+<li><strong><code>webbridge</code></strong> — Kimi WebBridge
   drives the user's real Chrome/Edge through a local daemon (<code>:10086</code>) and an
   extension, using their cookies and login sessions. Snapshots are an
   accessibility tree with <code>@e</code> refs.</li>
@@ -3473,7 +3550,7 @@ them except <code>find_tab</code>, <code>network</code>, and <code>upload</code>
   is already loaded or a shell command can still reach the network.</li>
 </ul>
 <p>Install the browser-use extra with:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"mini-swe-agent[browser-use] @ git+https://github.com/BenWongCityuCS/mini-swe-agent-v2.git@main"</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"mini-swe-agent[browser-use] @ git+https://github.com/your-org/mini-swe-agent-v2.git@main"</span>
 </code></pre></div>
 <p>browser-use needs Playwright and a Chrome/Chromium installation. If it cannot
 find a browser, set <code>browser_use.executable_path</code> or <code>browser_use.cdp_url</code>.</p>
@@ -3617,13 +3694,13 @@ is expanded. Content is appended verbatim (no Jinja rendering) inside
         
         
           
-          <a href="../swebench/" class="md-footer__link md-footer__link--next" aria-label="Next: SWE-bench">
+          <a href="../workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Workflows">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                SWE-bench
+                Workflows
               </div>
             </div>
             <div class="md-footer__button md-icon">

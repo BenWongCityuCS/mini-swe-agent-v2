@@ -551,6 +551,8 @@
       
         
       
+        
+      
     
     
     
@@ -665,6 +667,34 @@
     
   
     Extensions: skills, subagents, plugins, MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
   
 
     
@@ -2685,6 +2715,7 @@
     <span class="n">SubagentsConfig</span><span class="p">,</span>
     <span class="n">ToolsConfig</span><span class="p">,</span>
     <span class="n">VisionConfig</span><span class="p">,</span>
+    <span class="n">WorkflowConfig</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.registry</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolRegistry</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.utils.serialize</span><span class="w"> </span><span class="kn">import</span> <span class="n">recursive_merge</span>
@@ -2739,6 +2770,8 @@
 <span class="w">    </span><span class="sd">"""Conversation persistence and resume."""</span>
     <span class="n">bus</span><span class="p">:</span> <span class="n">AgentBusConfig</span> <span class="o">=</span> <span class="n">AgentBusConfig</span><span class="p">()</span>
 <span class="w">    </span><span class="sd">"""Agent-to-agent messaging (SendMessage)."""</span>
+    <span class="n">workflow</span><span class="p">:</span> <span class="n">WorkflowConfig</span> <span class="o">=</span> <span class="n">WorkflowConfig</span><span class="p">()</span>
+<span class="w">    </span><span class="sd">"""Durable multi-phase workflows with a scheduled DAG and typed subagent results."""</span>
 
 
 <span class="k">class</span><span class="w"> </span><span class="nc">DefaultAgent</span><span class="p">:</span>
@@ -2787,6 +2820,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_hooks</span> <span class="o">=</span> <span class="n">hook_runner</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_bus</span> <span class="o">=</span> <span class="n">agent_bus</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_session_store</span> <span class="o">=</span> <span class="n">session_store</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_workflow_store</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">session</span><span class="o">.</span><span class="n">id</span> <span class="ow">or</span> <span class="s2">""</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_session_created_at</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_resumed</span> <span class="o">=</span> <span class="kc">False</span>
@@ -2954,6 +2988,27 @@
                 <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">,</span>
                 <span class="n">session_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_session_id</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span>
             <span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">workflow</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.workflow</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+                <span class="n">WORKFLOW_GUIDE</span><span class="p">,</span>
+                <span class="n">WorkflowStore</span><span class="p">,</span>
+                <span class="n">build_workflow_runner</span><span class="p">,</span>
+                <span class="n">build_workflow_tools</span><span class="p">,</span>
+            <span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_workflow_store</span> <span class="o">=</span> <span class="n">WorkflowStore</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">workflow</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workspace</span><span class="p">)</span>
+            <span class="n">workflow_runner</span> <span class="o">=</span> <span class="n">build_workflow_runner</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tools</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+                <span class="n">build_workflow_tools</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_workflow_store</span><span class="p">,</span>
+                    <span class="n">workflow_runner</span><span class="p">,</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">workflow</span><span class="p">,</span>
+                    <span class="n">background_manager</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_background</span><span class="p">,</span>
+                    <span class="n">owner</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_id</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_prompt_sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">WORKFLOW_GUIDE</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">vision</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
             <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.extensions.vision</span><span class="w"> </span><span class="kn">import</span> <span class="n">VisionClient</span><span class="p">,</span> <span class="n">build_vision_tool</span>
