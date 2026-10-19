@@ -3392,7 +3392,7 @@
         <span class="p">)</span>
         <span class="k">if</span> <span class="n">compact_boundary</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="kc">False</span>
-        <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context.compact.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">minisweagent.context.compact.prompt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MINIMAL_SUMMARY_TEMPLATE</span><span class="p">,</span> <span class="n">format_compact_summary</span>
 
         <span class="n">template</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_template</span>
         <span class="n">safety</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span>
@@ -3432,36 +3432,55 @@
         <span class="k">if</span> <span class="n">pre</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">pre</span><span class="o">.</span><span class="n">blocked</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"PreCompact hook blocked compaction: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">pre</span><span class="o">.</span><span class="n">message</span><span class="p">)</span>
             <span class="k">return</span> <span class="kc">False</span>
-        <span class="n">prompt</span> <span class="o">=</span> <span class="n">render_summary_prompt</span><span class="p">(</span>
-            <span class="n">template</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="p">:</span> <span class="n">boundary</span><span class="p">],</span>
-        <span class="p">)</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span><span class="p">:</span>
-            <span class="n">prompt</span> <span class="o">+=</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">Additional Instructions:</span><span class="se">\n</span><span class="s2">"</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span>
+        <span class="n">transcript</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">messages</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">compacted_until</span> <span class="p">:</span> <span class="n">boundary</span><span class="p">]</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">render_prompt</span><span class="p">(</span><span class="n">messages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="n">rendered</span> <span class="o">=</span> <span class="n">render_summary_prompt</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">compaction_state</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span> <span class="n">messages</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span><span class="p">:</span>
+                <span class="n">rendered</span> <span class="o">+=</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">Additional Instructions:</span><span class="se">\n</span><span class="s2">"</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_instructions</span>
+            <span class="k">return</span> <span class="n">rendered</span>
+
+        <span class="n">prompt</span> <span class="o">=</span> <span class="n">render_prompt</span><span class="p">(</span><span class="n">transcript</span><span class="p">)</span>
         <span class="n">generation_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"max_tokens"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_max_tokens</span><span class="p">}</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_reasoning_effort</span><span class="p">:</span>
             <span class="n">generation_kwargs</span><span class="p">[</span><span class="s2">"reasoning_effort"</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">compaction</span><span class="o">.</span><span class="n">summary_reasoning_effort</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">n_compaction_calls</span> <span class="o">+=</span> <span class="mi">1</span>
         <span class="n">cost</span> <span class="o">=</span> <span class="mf">0.0</span>
         <span class="n">summary</span> <span class="o">=</span> <span class="s2">""</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate_text</span><span class="p">(</span>
-                <span class="p">[</span>
-                    <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
-                        <span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span>
-                        <span class="n">content</span><span class="o">=</span><span class="s2">"Return only the requested conversation checkpoint, without commentary."</span><span class="p">,</span>
-                    <span class="p">),</span>
-                    <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">prompt</span><span class="p">),</span>
-                <span class="p">],</span>
-                <span class="o">**</span><span class="n">generation_kwargs</span><span class="p">,</span>
-            <span class="p">)</span>
-            <span class="n">cost</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cost"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
-            <span class="n">summary</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"text"</span><span class="p">,</span> <span class="s2">""</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-            <span class="c1"># A provider error or a context/tokenizer mismatch must not kill a</span>
-            <span class="c1"># long run. Continue with a bounded local checkpoint.</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction summary call failed: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="c1"># ZCode retries a too-long compact prompt by truncating earlier messages</span>
+        <span class="c1"># (MAX_COMPACT_PROMPT_TOO_LONG_RETRIES = 3) before giving up.</span>
+        <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate_text</span><span class="p">(</span>
+                    <span class="p">[</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span>
+                            <span class="n">role</span><span class="o">=</span><span class="s2">"system"</span><span class="p">,</span>
+                            <span class="n">content</span><span class="o">=</span><span class="s2">"Return only the requested conversation checkpoint, without commentary."</span><span class="p">,</span>
+                        <span class="p">),</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">format_message</span><span class="p">(</span><span class="n">role</span><span class="o">=</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">prompt</span><span class="p">),</span>
+                    <span class="p">],</span>
+                    <span class="o">**</span><span class="n">generation_kwargs</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">cost</span> <span class="o">+=</span> <span class="nb">float</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cost"</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+                <span class="n">summary</span> <span class="o">=</span> <span class="n">format_compact_summary</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"text"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)))</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="n">ContextWindowExceeded</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">attempt</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">transcript</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction prompt still too long after retries: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+                    <span class="k">break</span>
+                <span class="n">drop</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">transcript</span><span class="p">)</span> <span class="o">//</span> <span class="mi">4</span><span class="p">)</span>
+                <span class="n">transcript</span> <span class="o">=</span> <span class="n">transcript</span><span class="p">[</span><span class="n">drop</span><span class="p">:]</span>
+                <span class="n">prompt</span> <span class="o">=</span> <span class="n">render_prompt</span><span class="p">(</span>
+                    <span class="p">[{</span><span class="s2">"role"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"content"</span><span class="p">:</span> <span class="s2">"[earlier conversation truncated for compaction retry]"</span><span class="p">},</span> <span class="o">*</span><span class="n">transcript</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                    <span class="s2">"compaction prompt too long; truncated </span><span class="si">%d</span><span class="s2"> earlier message(s) and retrying"</span><span class="p">,</span> <span class="n">drop</span>
+                <span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="c1"># A provider error must not kill a long run. Continue with a</span>
+                <span class="c1"># bounded local checkpoint.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"compaction summary call failed: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+                <span class="k">break</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">cost</span> <span class="o">+=</span> <span class="n">cost</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">summary</span><span class="p">:</span>
             <span class="n">summary</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fallback_summary</span><span class="p">(</span><span class="n">boundary</span><span class="p">)</span>
