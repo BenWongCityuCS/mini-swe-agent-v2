@@ -731,7 +731,14 @@ class DefaultAgent:
         from minisweagent.context.compact.prompt import MINIMAL_SUMMARY_TEMPLATE
 
         template = self.config.compaction.summary_template
-        input_limit = max(0, self.context_limit - self.config.compaction.summary_max_tokens)
+        safety = min(
+            self.config.compaction.summary_safety_tokens,
+            max(0, self.context_limit // 10),
+        )
+        available = self.context_limit - self.config.compaction.summary_max_tokens - safety
+        if self.config.compaction.summary_input_tokens > 0:
+            available = min(available, self.config.compaction.summary_input_tokens)
+        input_limit = max(0, available)
         boundary = fitting_summary_boundary(
             self.messages,
             self.compaction_state.compacted_until,
@@ -768,24 +775,33 @@ class DefaultAgent:
         )
         if self.config.compaction.summary_instructions:
             prompt += "\n\nAdditional Instructions:\n" + self.config.compaction.summary_instructions
-        result = self.model.generate_text(
-            [
-                self.model.format_message(
-                    role="system", content="Return only the requested conversation checkpoint, without commentary."
-                ),
-                self.model.format_message(role="user", content=prompt),
-            ],
-            max_tokens=self.config.compaction.summary_max_tokens,
-        )
+        generation_kwargs: dict = {"max_tokens": self.config.compaction.summary_max_tokens}
+        if self.config.compaction.summary_reasoning_effort:
+            generation_kwargs["reasoning_effort"] = self.config.compaction.summary_reasoning_effort
         self.n_compaction_calls += 1
-        cost = result["cost"]
+        cost = 0.0
+        summary = ""
+        try:
+            result = self.model.generate_text(
+                [
+                    self.model.format_message(
+                        role="system",
+                        content="Return only the requested conversation checkpoint, without commentary.",
+                    ),
+                    self.model.format_message(role="user", content=prompt),
+                ],
+                **generation_kwargs,
+            )
+            cost = float(result.get("cost", 0.0))
+            summary = str(result.get("text", "")).strip()
+        except Exception as exc:
+            # A provider error or a context/tokenizer mismatch must not kill a
+            # long run. Continue with a bounded local checkpoint.
+            self.logger.warning("compaction summary call failed: %s", exc)
         self.cost += cost
-        if not (summary := result["text"].strip()):
-            # A reasoning-only or truncated response can leave content empty.
-            # Do not kill a long run for a summarizer hiccup: keep a bounded,
-            # deterministic checkpoint and continue.
+        if not summary:
             summary = self._fallback_summary(boundary)
-            self.logger.warning("compaction model returned an empty checkpoint; using a local fallback summary")
+            self.logger.warning("compaction model returned no checkpoint; using a local fallback summary")
         self.compaction_state.summary = summary
         self.compaction_state.compacted_until = boundary
         after = estimate_tokens(self._messages_for_model())

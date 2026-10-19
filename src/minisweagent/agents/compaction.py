@@ -20,6 +20,17 @@ class CompactionConfig(BaseModel):
     keep_tokens: int = Field(default=15_000, ge=0)
     buffer: int = Field(default=20_000, ge=0)
     summary_max_tokens: int = Field(default=4_096, gt=0)
+    summary_input_tokens: int = Field(default=60_000, ge=0)
+    """Cap the transcript per summary call. 0 uses the full available window.
+
+    A single call asked to compress a near-limit history can spend its whole
+    output budget on reasoning and return empty content. A cap forces a few
+    smaller checkpoints instead, which are more reliable.
+    """
+    summary_safety_tokens: int = Field(default=8_192, ge=0)
+    """Reserve tokens for tokenizer mismatch and template overhead."""
+    summary_reasoning_effort: str | None = None
+    """Override reasoning effort for summary calls. None inherits the model config."""
     summary_template: str = DEFAULT_SUMMARY_TEMPLATE
     summary_instructions: str = ""
     """Extra instructions appended to the summary prompt."""

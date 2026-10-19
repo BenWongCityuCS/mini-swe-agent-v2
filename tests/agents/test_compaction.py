@@ -47,6 +47,10 @@ def make_agent(model, **compaction):
             "keep_tokens": 0,
             "buffer": 100,
             "summary_max_tokens": 100,
+            # Keep the artificial small-context tests on the old full-window
+            # behavior; the production defaults are exercised separately.
+            "summary_input_tokens": 0,
+            "summary_safety_tokens": 0,
             **compaction,
         },
     )
@@ -187,6 +191,22 @@ def test_empty_checkpoint_uses_local_fallback(reset_global_stats):
     assert agent.compaction_state.compacted_until > 1
     assert agent.n_compaction_calls == 1
     assert agent.cost == 0.2
+
+
+def test_summary_call_failure_uses_local_fallback(reset_global_stats):
+    class FailingSummaryModel(RecordingModel):
+        def generate_text(self, messages, **kwargs):
+            self.summary_queries.append(messages)
+            raise RuntimeError("provider down")
+
+    model = FailingSummaryModel(outputs=[])
+    agent = make_agent(model)
+    add_complete_history(agent)
+
+    assert agent._compact_once("auto")
+    assert agent.compaction_state.summary.startswith("Automatic fallback summary")
+    assert agent.compaction_state.compacted_until > 1
+    assert agent.n_compaction_calls == 1
 
 
 def test_second_context_overflow_propagates(reset_global_stats):
