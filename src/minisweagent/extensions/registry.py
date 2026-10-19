@@ -7,6 +7,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 
+from minisweagent.exceptions import InterruptAgentFlow
+
 logger = logging.getLogger("extensions")
 
 
@@ -58,6 +60,9 @@ class ToolRegistry:
             return self._tools[name].handler(args or {})
         except KeyError:
             return err(f"Unknown tool {name!r}. Available tools: {', '.join(self.names()) or '(none)'}")
+        except InterruptAgentFlow:
+            # submit_result / escalate intentionally end the agent turn.
+            raise
         except Exception as exc:  # a tool must never crash the agent loop
             logger.exception("extension tool %s failed", name)
             return err(f"{type(exc).__name__}: {exc}")

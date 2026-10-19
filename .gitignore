@@ -191,3 +191,6 @@ pyrightconfig.json
 .handoff/
 .handoff-logs/
 .zcode-trash/
+
+# runtime state (todo lists, workflow runs, sessions)
+.mini-swe-agent/

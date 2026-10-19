@@ -17,15 +17,20 @@ tools, plugins, automations) is inspired by the design of **ZCode**:
 
 - ZCode: https://github.com/zai-org/ZCode
 
-No ZCode source code was copied; the Python implementation in
-`src/minisweagent/extensions/` was written for this fork.
+The workflow runtime in `src/minisweagent/workflow/` and its actor, phase,
+node, and planner prompts are ported from ZCode's open-source dynamic-workflow
+implementation:
 
-The browser tool implements the local HTTP protocol documented by
-**kimi-webbridge-enhanced** (Kimi WebBridge):
+- ZCode: https://github.com/zai-org/ZCode
+- ZCode license: Apache-2.0
 
-- Kimi WebBridge: https://github.com/BenWongCityuCS/kimi-webbridge-enhanced
+The rest of the Python extension layer in `src/minisweagent/extensions/` was
+written for this fork.
 
-No Kimi WebBridge code is vendored; the client is a small urllib-based bridge.
+The browser tool implements the local HTTP protocol of the
+[Kimi WebBridge](https://github.com/BenWongCityuCS/kimi-webbridge-enhanced)
+browser extension. No Kimi WebBridge code is vendored; the client is a small
+urllib-based bridge.
 
 This fork is maintained independently. It is not affiliated with, sponsored by,
 or endorsed by the upstream maintainers, SWE-agent, ZCode, or Kimi.

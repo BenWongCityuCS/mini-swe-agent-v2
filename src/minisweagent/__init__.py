@@ -8,7 +8,7 @@ This file provides:
   unless you want the static type checking.
 """
 
-__version__ = "3.3.0"
+__version__ = "2.4.6+extensions.3"
 
 import os
 from pathlib import Path

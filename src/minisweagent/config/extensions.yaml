@@ -72,6 +72,19 @@ agent:
     keep_media: true
     max_sessions: 0
 
+  # Durable multi-phase workflows. `expert` is built in; definitions can be
+  # saved as YAML under ./workflows or ~/.mini-swe-agent/workflows.
+  workflow:
+    enabled: true
+    dirs:
+      - "./workflows"
+      - "~/.mini-swe-agent/workflows"
+    run_dir: ".mini-swe-agent/workflow-runs"
+    default_definition: expert
+    max_concurrent: 3
+    max_retries: 1
+    max_steps_per_agent: 0
+
   # Event hooks. Auto-discovers .mini-swe-agent/hooks.yaml and
   # ~/.mini-swe-agent/hooks.yaml. A hook is a shell command that receives JSON
   # on stdin; exit code 2 blocks a PreToolUse action.

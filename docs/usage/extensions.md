@@ -449,6 +449,39 @@ State (last run, status, count) lives in
 `.mini-swe-agent/automations-state.json`; each run writes a trajectory and a log
 under `~/.mini-swe-agent/automations/runs/<name>/`.
 
+## Workflows
+
+A workflow is a durable, multi-phase run with a scheduled DAG, typed subagent
+results, artifacts, a journal, and resume. It is a Python port of ZCode's
+dynamic-workflow core; the TypeScript authoring facade and sandbox are not
+included.
+
+```yaml
+agent:
+  workflow:
+    enabled: true
+    dirs: ["./workflows", "~/.mini-swe-agent/workflows"]
+    run_dir: ".mini-swe-agent/workflow-runs"
+    default_definition: expert
+    max_concurrent: 3
+    max_retries: 1
+```
+
+The built-in `expert` workflow runs clarify, task analysis, architecture
+decomposition, environment setup, meta prompt, a scheduled execution DAG, a
+final critic, and a report. Tools: `WorkflowCreate`, `WorkflowList`,
+`WorkflowRun`, `WorkflowStatus`. Workflow subagents additionally receive
+`submit_result` (validated against a JSON schema) and `escalate`.
+
+```bash
+mini-workflow list
+mini-workflow status <run-id>
+mini-workflow run expert --task "..." -c mini.yaml -c extensions.yaml
+```
+
+See [Workflows](workflow.md) for the definition schema, typed results, and
+resume semantics.
+
 ## Browser (WebBridge or browser-use)
 
 The browser tool has two interchangeable backends; the user picks one with

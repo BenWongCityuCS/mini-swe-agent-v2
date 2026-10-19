@@ -1,5 +1,6 @@
 import pytest
 
+from minisweagent.exceptions import Submitted
 from minisweagent.extensions.registry import Tool, ToolRegistry, err, ok
 
 
@@ -27,6 +28,16 @@ def test_add_call_and_order():
     assert registry.call("Read", {"path": "a"}) == ok("Read")
     assert calls == [("Read", {"path": "a"})]
     assert len(registry.specs()) == 2
+
+
+def test_call_reraises_agent_interrupts():
+    def submit(args: dict) -> dict:
+        raise Submitted({"role": "exit", "content": "done", "extra": {"submission": "done"}})
+
+    registry = ToolRegistry()
+    registry.add(Tool(name="submit_result", description="", parameters={}, handler=submit))
+    with pytest.raises(Submitted):
+        registry.call("submit_result", {"result": "done"})
 
 
 def test_filter_patterns():

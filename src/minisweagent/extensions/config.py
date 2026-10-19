@@ -246,6 +246,19 @@ class AgentBusConfig(BaseModel):
     max_inbox: int = 50
 
 
+class WorkflowConfig(BaseModel):
+    """Durable multi-phase workflows (a Python port of ZCode's dynamic workflow)."""
+
+    enabled: bool = False
+    dirs: list[str] = Field(default_factory=lambda: ["./workflows", "~/.mini-swe-agent/workflows"])
+    run_dir: str = ".mini-swe-agent/workflow-runs"
+    default_definition: str = "expert"
+    max_concurrent: int = 3
+    max_retries: int = 1
+    max_steps_per_agent: int = 0
+    """Per workflow subagent step limit. 0 inherits the parent's limit."""
+
+
 class VisionConfig(BaseModel):
     """Route images to a separate vision-capable model."""
 

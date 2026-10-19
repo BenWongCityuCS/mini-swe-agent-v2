@@ -100,6 +100,7 @@ mini-swe-agent = "minisweagent.run.mini:app"
 mini-extra = "minisweagent.run.utilities.mini_extra:main"
 mini-e= "minisweagent.run.utilities.mini_extra:main"
 mini-automation = "minisweagent.run.automation:app"
+mini-workflow = "minisweagent.run.workflow:app"
 
 [tool.setuptools]
 include-package-data = true

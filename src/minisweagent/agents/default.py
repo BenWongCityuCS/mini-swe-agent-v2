@@ -51,6 +51,7 @@ from minisweagent.extensions.config import (
     SubagentsConfig,
     ToolsConfig,
     VisionConfig,
+    WorkflowConfig,
 )
 from minisweagent.extensions.registry import ToolRegistry
 from minisweagent.utils.serialize import recursive_merge
@@ -105,6 +106,8 @@ class AgentConfig(BaseModel):
     """Conversation persistence and resume."""
     bus: AgentBusConfig = AgentBusConfig()
     """Agent-to-agent messaging (SendMessage)."""
+    workflow: WorkflowConfig = WorkflowConfig()
+    """Durable multi-phase workflows with a scheduled DAG and typed subagent results."""
 
 
 class DefaultAgent:
@@ -153,6 +156,7 @@ class DefaultAgent:
         self._hooks = hook_runner
         self._bus = agent_bus
         self._session_store = session_store
+        self._workflow_store = None
         self._session_id = self.config.session.id or ""
         self._session_created_at = time.time()
         self._resumed = False
@@ -320,6 +324,27 @@ class DefaultAgent:
                 self._workspace,
                 session_id=self._session_id or self.agent_id,
             )
+
+        if self.config.workflow.enabled:
+            from minisweagent.workflow import (
+                WORKFLOW_GUIDE,
+                WorkflowStore,
+                build_workflow_runner,
+                build_workflow_tools,
+            )
+
+            self._workflow_store = WorkflowStore(self.config.workflow, self._workspace)
+            workflow_runner = build_workflow_runner(self)
+            self._tools.extend(
+                build_workflow_tools(
+                    self._workflow_store,
+                    workflow_runner,
+                    self.config.workflow,
+                    background_manager=self._background,
+                    owner=self.agent_id,
+                )
+            )
+            self._prompt_sections.append(WORKFLOW_GUIDE)
 
         if self.config.vision.enabled:
             from minisweagent.extensions.vision import VisionClient, build_vision_tool

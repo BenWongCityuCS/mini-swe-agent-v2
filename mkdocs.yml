@@ -66,6 +66,7 @@ nav:
       - "<code>mini</code>": usage/mini.md
       - "Config": usage/config.md
       - "Extensions: skills, subagents, plugins, MCP": usage/extensions.md
+      - "Workflows": usage/workflow.md
       - "SWE-bench": usage/swebench.md
       - "ProgramBench": usage/programbench.md
       - "Inspector": usage/inspector.md

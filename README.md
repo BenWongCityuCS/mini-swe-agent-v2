@@ -1,4 +1,4 @@
-# mini-swe-agent v3 — the second generation
+# mini-swe-agent v2
 
 An opinionated, unofficial rebuild of
 [SWE-agent/mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent).
@@ -74,6 +74,10 @@ loop — and adds the modern surface around it. Everything is opt-in, so the bar
   (`list`, `run`, `tick`, `serve`).
 - **Mountable prompts** — `AGENTS.md`-style files and directories appended to the
   system prompt, with globs and `${WORKSPACE}` expansion.
+- **Workflows** — a durable multi-phase `expert` workflow with a scheduled DAG,
+  typed `submit_result` / `escalate`, artifacts, journal, and resume. Definitions
+  are YAML/JSON and can be authored with `WorkflowCreate`; runs are started with
+  `WorkflowRun` or the `mini-workflow` CLI.
 
 ## Context management (ZCode-style)
 
@@ -123,14 +127,21 @@ under `context`, plus the microcompact and summary counters.
 pip install "mini-swe-agent[extensions] @ git+https://github.com/BenWongCityuCS/mini-swe-agent-v2.git@main"
 ```
 
-Use the second-generation preset on top of the stock config:
+Use the extensions preset on top of the stock config:
 
 ```bash
 mini -c mini.yaml -c extensions.yaml --task "Fix the failing test"
 ```
 
-`extensions.yaml` enables TodoWrite, Edit/Write, skills, subagents, plugins, and
-automations. Browser and vision are configured but disabled by default.
+`extensions.yaml` enables TodoWrite, Edit/Write, skills, subagents, workflows,
+plugins, and automations. Browser and vision are configured but disabled by
+default.
+
+For the ZCode-style prompt, layer `zcode.yaml` as well:
+
+```bash
+mini -c mini.yaml -c extensions.yaml -c zcode.yaml --task "Fix the failing test"
+```
 
 Minimal config for a self-hosted OpenAI-compatible endpoint:
 
@@ -213,7 +224,7 @@ def register(registry, context):
 
 The browser tool has two backends and the user picks one:
 
-- **`webbridge`** (default) — Kimi WebBridge drives the user's real Chrome/Edge
+- **`webbridge`** (default) — [Kimi WebBridge](https://github.com/BenWongCityuCS/kimi-webbridge-enhanced) drives the user's real Chrome/Edge
   with their cookies and logins. It prefers the tab-limit proxy on `:11086`,
   enforces a per-session tab budget, and closes agent-created sessions.
 - **`browser_use`** — Playwright-based automation through the
@@ -310,6 +321,7 @@ mini-automation serve --interval 60
 | Automation | None | cron/interval runner |
 | Browser | None | Kimi WebBridge with tab guard |
 | Images | Whatever the model can see | Optional separate vision model |
+| Workflows | None | Expert phases + scheduled DAG + typed results + resume |
 
 ## Attribution and license
 
@@ -318,9 +330,12 @@ mini-automation serve --interval 60
   [#948](https://github.com/SWE-agent/mini-swe-agent/pull/948) by
   [@wasiahmad](https://github.com/wasiahmad).
 - The extension design (skills, subagents, MCP naming, mountable prompts) is
-  inspired by [ZCode](https://github.com/zai-org/ZCode). No ZCode source code was copied.
+  inspired by [ZCode](https://github.com/zai-org/ZCode).
+- The workflow runtime and its actor/phase/node/planner prompts are ported from
+  ZCode's open-source dynamic-workflow implementation (Apache-2.0). See
+  [NOTICE.md](NOTICE.md).
 - The browser protocol follows
-  [kimi-webbridge-enhanced](https://github.com/BenWongCityuCS/kimi-webbridge-enhanced).
+  [Kimi WebBridge](https://github.com/BenWongCityuCS/kimi-webbridge-enhanced).
 - This project is not affiliated with or endorsed by the upstream maintainers.
 
 MIT licensed. See [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md).
