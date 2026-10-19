@@ -3256,12 +3256,12 @@ into one system prompt:</p>
      agent stops retrying compaction for the run instead of looping.</li>
 <li>If the summary prompt itself does not fit a small model's input budget,
      the engine falls back to a minimal template.</li>
-<li><strong>ZCode's summary budget and retry.</strong> <code>summary_max_tokens</code> defaults to
-     <strong>20000</strong>, matching ZCode's <code>MAX_OUTPUT_TOKENS_FOR_SUMMARY</code>; a reasoning
-     model needs room for its <code>&lt;analysis&gt;</code> before the <code>&lt;summary&gt;</code>. The analysis
-     block is removed before the checkpoint is stored. If the prompt is still
-     too long, earlier messages are truncated and the call is retried up to
-     three times.</li>
+<li><strong>Configurable summary budget and retry.</strong> <code>summary_max_tokens</code> defaults
+     to <strong>60000</strong> and is set per model/config: ZCode hard-codes 20000, but
+     reasoning-heavy models can spend much more on the <code>&lt;analysis&gt;</code> block before
+     the <code>&lt;summary&gt;</code>. The analysis block is removed before the checkpoint is
+     stored. If the prompt is still too long, earlier messages are truncated and
+     the call is retried up to three times.</li>
 <li><strong>Fallback checkpoint.</strong> If the summary call fails, hits the context limit
      after the retries, or returns no text, the engine writes a bounded local
      checkpoint from the old messages and continues instead of killing the run.</li>
@@ -3289,7 +3289,7 @@ into one system prompt:</p>
 <span class="w">    </span><span class="nt">context_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">299200</span><span class="w">   </span><span class="c1"># required for self-hosted models</span>
 <span class="w">    </span><span class="nt">keep_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15000</span>
 <span class="w">    </span><span class="nt">buffer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">13000</span><span class="w">                 </span><span class="c1"># ZCode AUTOCOMPACT_BUFFER_TOKENS</span>
-<span class="w">    </span><span class="nt">summary_max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span><span class="w">     </span><span class="c1"># ZCode MAX_OUTPUT_TOKENS_FOR_SUMMARY</span>
+<span class="w">    </span><span class="nt">summary_max_tokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60000</span><span class="w">     </span><span class="c1"># tune per model; reasoning models need more</span>
 <span class="w">    </span><span class="c1"># summary_input_tokens: 0     # 0 = full window; too-long prompts retry</span>
 <span class="w">    </span><span class="c1"># summary_safety_tokens: 0</span>
 <span class="w">    </span><span class="c1"># summary_reasoning_effort: low</span>
