@@ -781,7 +781,11 @@ class DefaultAgent:
         cost = result["cost"]
         self.cost += cost
         if not (summary := result["text"].strip()):
-            raise RuntimeError("Compaction model returned an empty checkpoint.")
+            # A reasoning-only or truncated response can leave content empty.
+            # Do not kill a long run for a summarizer hiccup: keep a bounded,
+            # deterministic checkpoint and continue.
+            summary = self._fallback_summary(boundary)
+            self.logger.warning("compaction model returned an empty checkpoint; using a local fallback summary")
         self.compaction_state.summary = summary
         self.compaction_state.compacted_until = boundary
         after = estimate_tokens(self._messages_for_model())
@@ -799,6 +803,24 @@ class DefaultAgent:
             "PostCompact", extra={"reason": reason, "tokens_after": after, "cost": cost}
         )
         return True
+
+    def _fallback_summary(self, boundary: int) -> str:
+        """Build a bounded local checkpoint when the summarizer returns no text."""
+        from minisweagent.context.utils import truncate_to_tokens
+        from minisweagent.models.utils.content_string import get_content_string
+
+        parts: list[str] = []
+        for message in self.messages[self.compaction_state.compacted_until : boundary]:
+            text = get_content_string(message).strip()
+            if text:
+                parts.append(f"[{message.get('role', 'unknown')}] {text}")
+        joined = "\n\n".join(parts)
+        if not joined:
+            return "Previous conversation compacted (the summarizer returned no text)."
+        budget = max(256, self.config.compaction.summary_max_tokens - 64)
+        return "Automatic fallback summary (the summarizer returned no text):\n" + truncate_to_tokens(
+            joined, budget
+        )
 
     def _compact_until_fit(self, reason: str) -> bool:
         from minisweagent.context.compact import maybe_microcompact, should_compact

@@ -177,15 +177,14 @@ def test_repeated_compaction_updates_previous_checkpoint(reset_global_stats):
     assert "first checkpoint" in model.summary_queries[1][1]["content"]
 
 
-def test_empty_checkpoint_is_rejected_without_advancing_state(reset_global_stats):
+def test_empty_checkpoint_uses_local_fallback(reset_global_stats):
     model = RecordingModel(outputs=[], summary_outputs=[""], cost_per_call=0.2)
     agent = make_agent(model)
     add_complete_history(agent)
 
-    with pytest.raises(RuntimeError, match="empty checkpoint"):
-        agent._compact_once("auto")
-    assert agent.compaction_state.summary == ""
-    assert agent.compaction_state.compacted_until == 1
+    assert agent._compact_once("auto")
+    assert agent.compaction_state.summary.startswith("Automatic fallback summary")
+    assert agent.compaction_state.compacted_until > 1
     assert agent.n_compaction_calls == 1
     assert agent.cost == 0.2
 
