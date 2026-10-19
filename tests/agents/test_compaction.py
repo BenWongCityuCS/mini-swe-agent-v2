@@ -209,6 +209,29 @@ def test_summary_call_failure_uses_local_fallback(reset_global_stats):
     assert agent.n_compaction_calls == 1
 
 
+def test_summary_prompt_too_long_retries_with_truncation(reset_global_stats):
+    class TooLongOnceModel(RecordingModel):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.failed_once = False
+
+        def generate_text(self, messages, **kwargs):
+            if not self.failed_once:
+                self.failed_once = True
+                self.summary_queries.append(messages)
+                raise ContextWindowExceeded("too long")
+            return super().generate_text(messages, **kwargs)
+
+    model = TooLongOnceModel(outputs=[], summary_outputs=["checkpoint"])
+    agent = make_agent(model)
+    add_complete_history(agent)
+
+    assert agent._compact_once("auto")
+    assert agent.compaction_state.summary == "checkpoint"
+    assert agent.n_compaction_calls == 1
+    assert len(model.summary_queries) == 2
+
+
 def test_second_context_overflow_propagates(reset_global_stats):
     class AlwaysOverflowModel(RecordingModel):
         def query(self, messages, **kwargs):

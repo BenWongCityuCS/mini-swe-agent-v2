@@ -25,7 +25,9 @@ def output_reserve(model_output_tokens: int) -> int:
 
 
 def compact_threshold(context_limit: int, buffer: int, output_tokens: int) -> int:
-    return max(0, context_limit - max(buffer, output_reserve(output_tokens)))
+    # ZCode keeps the output reserve and the buffer as separate deductions:
+    # effective_window = context - output_reserve; threshold = effective - buffer.
+    return max(0, context_limit - output_reserve(output_tokens) - max(0, buffer))
 
 
 def should_compact(

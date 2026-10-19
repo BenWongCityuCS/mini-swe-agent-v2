@@ -728,7 +728,7 @@ class DefaultAgent:
         )
         if compact_boundary is None:
             return False
-        from minisweagent.context.compact.prompt import MINIMAL_SUMMARY_TEMPLATE
+        from minisweagent.context.compact.prompt import MINIMAL_SUMMARY_TEMPLATE, format_compact_summary
 
         template = self.config.compaction.summary_template
         safety = min(
@@ -768,36 +768,55 @@ class DefaultAgent:
         if pre is not None and pre.blocked:
             self.logger.warning("PreCompact hook blocked compaction: %s", pre.message)
             return False
-        prompt = render_summary_prompt(
-            template,
-            self.compaction_state.summary,
-            self.messages[self.compaction_state.compacted_until : boundary],
-        )
-        if self.config.compaction.summary_instructions:
-            prompt += "\n\nAdditional Instructions:\n" + self.config.compaction.summary_instructions
+        transcript = self.messages[self.compaction_state.compacted_until : boundary]
+
+        def render_prompt(messages: list[dict]) -> str:
+            rendered = render_summary_prompt(template, self.compaction_state.summary, messages)
+            if self.config.compaction.summary_instructions:
+                rendered += "\n\nAdditional Instructions:\n" + self.config.compaction.summary_instructions
+            return rendered
+
+        prompt = render_prompt(transcript)
         generation_kwargs: dict = {"max_tokens": self.config.compaction.summary_max_tokens}
         if self.config.compaction.summary_reasoning_effort:
             generation_kwargs["reasoning_effort"] = self.config.compaction.summary_reasoning_effort
         self.n_compaction_calls += 1
         cost = 0.0
         summary = ""
-        try:
-            result = self.model.generate_text(
-                [
-                    self.model.format_message(
-                        role="system",
-                        content="Return only the requested conversation checkpoint, without commentary.",
-                    ),
-                    self.model.format_message(role="user", content=prompt),
-                ],
-                **generation_kwargs,
-            )
-            cost = float(result.get("cost", 0.0))
-            summary = str(result.get("text", "")).strip()
-        except Exception as exc:
-            # A provider error or a context/tokenizer mismatch must not kill a
-            # long run. Continue with a bounded local checkpoint.
-            self.logger.warning("compaction summary call failed: %s", exc)
+        # ZCode retries a too-long compact prompt by truncating earlier messages
+        # (MAX_COMPACT_PROMPT_TOO_LONG_RETRIES = 3) before giving up.
+        for attempt in range(3):
+            try:
+                result = self.model.generate_text(
+                    [
+                        self.model.format_message(
+                            role="system",
+                            content="Return only the requested conversation checkpoint, without commentary.",
+                        ),
+                        self.model.format_message(role="user", content=prompt),
+                    ],
+                    **generation_kwargs,
+                )
+                cost += float(result.get("cost", 0.0))
+                summary = format_compact_summary(str(result.get("text", "")))
+                break
+            except ContextWindowExceeded as exc:
+                if attempt >= 2 or len(transcript) <= 1:
+                    self.logger.warning("compaction prompt still too long after retries: %s", exc)
+                    break
+                drop = max(1, len(transcript) // 4)
+                transcript = transcript[drop:]
+                prompt = render_prompt(
+                    [{"role": "user", "content": "[earlier conversation truncated for compaction retry]"}, *transcript]
+                )
+                self.logger.warning(
+                    "compaction prompt too long; truncated %d earlier message(s) and retrying", drop
+                )
+            except Exception as exc:
+                # A provider error must not kill a long run. Continue with a
+                # bounded local checkpoint.
+                self.logger.warning("compaction summary call failed: %s", exc)
+                break
         self.cost += cost
         if not summary:
             summary = self._fallback_summary(boundary)

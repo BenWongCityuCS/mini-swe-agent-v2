@@ -31,14 +31,12 @@ agent:
   #   auto: true
   #   context_limit: 299200
   #   keep_tokens: 15000
-  #   buffer: 20000
-  #   summary_max_tokens: 4096
-  #   # Compress long histories in smaller chunks; a single near-limit call can
-  #   # spend its whole output budget on reasoning and return empty content.
-  #   summary_input_tokens: 60000
-  #   summary_safety_tokens: 8192
-  #   # Lower reasoning effort for summaries; omit to inherit model_kwargs.
-  #   summary_reasoning_effort: low
+  #   buffer: 13000
+  #   summary_max_tokens: 20000   # ZCode MAX_OUTPUT_TOKENS_FOR_SUMMARY
+  #   # A too-long compact prompt is retried up to 3 times with earlier
+  #   # messages truncated. summary_input_tokens/summary_safety_tokens default
+  #   # to 0 (full window); set them only if a provider needs a hard cap.
+  #   # summary_reasoning_effort: low
   #   microcompact: true
   #   microcompact_keep_recent: 5
   #   microcompact_min_savings: 256

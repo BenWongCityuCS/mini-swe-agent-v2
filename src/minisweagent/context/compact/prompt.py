@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 NO_TOOLS_PREAMBLE = """CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 
 - You already have all the context you need in the conversation above.
@@ -45,6 +47,18 @@ def build_compact_prompt(custom_instructions: str | None = None) -> str:
     if custom_instructions and custom_instructions.strip():
         extra = f"\n\nAdditional Instructions:\n{custom_instructions.strip()}"
     return f"{NO_TOOLS_PREAMBLE}{BASE_COMPACT_PROMPT}{extra}{NO_TOOLS_TRAILER}"
+
+
+def format_compact_summary(text: str | None) -> str:
+    """Drop the analysis block and keep ZCode's ``<summary>`` section."""
+    formatted = (text or "").strip()
+    if not formatted:
+        return ""
+    formatted = re.sub(r"<analysis>.*?</analysis>", "", formatted, flags=re.DOTALL)
+    match = re.search(r"<summary>(.*?)</summary>", formatted, flags=re.DOTALL)
+    if match:
+        formatted = "Summary:\n" + match.group(1).strip()
+    return re.sub(r"\n{3,}", "\n\n", formatted).strip()
 
 
 def build_summary_template(custom_instructions: str | None = None) -> str:

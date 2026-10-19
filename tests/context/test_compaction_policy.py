@@ -3,9 +3,9 @@ from minisweagent.context.compact import compact_threshold, should_compact
 from minisweagent.context.compact.prompt import build_summary_template
 
 
-def test_compact_threshold_reserves_output():
-    # max(buffer=100, output_reserve=100) = 100
-    assert compact_threshold(1000, 100, 100) == 900
+def test_compact_threshold_reserves_output_and_buffer():
+    # output reserve (100) and buffer (100) are separate deductions.
+    assert compact_threshold(1000, 100, 100) == 800
     # Large model output is capped at the default reserve.
     assert compact_threshold(1000, 100, 500_000) < 1000
 
@@ -41,6 +41,15 @@ def test_circuit_breaker_and_not_enough_messages():
     )
     assert not early.should_compact
     assert early.reason == "not_enough_messages"
+
+
+def test_format_compact_summary_strips_analysis():
+    from minisweagent.context.compact.prompt import format_compact_summary
+
+    text = "<analysis>private reasoning</analysis><summary>1. Primary Request: fix it</summary>"
+    assert format_compact_summary(text) == "Summary:\n1. Primary Request: fix it"
+    assert format_compact_summary("") == ""
+    assert format_compact_summary("plain checkpoint") == "plain checkpoint"
 
 
 def test_summary_template_covers_zcode_sections():

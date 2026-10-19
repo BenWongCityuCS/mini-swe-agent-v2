@@ -197,14 +197,15 @@ into one system prompt:
      agent stops retrying compaction for the run instead of looping.
   4. If the summary prompt itself does not fit a small model's input budget,
      the engine falls back to a minimal template.
-  5. **Bounded summary input.** `summary_input_tokens` caps how much transcript
-     one summary call sees (default 60000); long histories are compacted in a
-     few smaller checkpoints instead of one near-limit request. Reasoning models
-     can otherwise spend the whole `summary_max_tokens` budget on hidden
-     reasoning and return empty content.
-  6. **Fallback checkpoint.** If the summary call fails, hits the context limit,
-     or returns no text, the engine writes a bounded local checkpoint from the
-     old messages and continues instead of killing the run.
+  5. **ZCode's summary budget and retry.** `summary_max_tokens` defaults to
+     **20000**, matching ZCode's `MAX_OUTPUT_TOKENS_FOR_SUMMARY`; a reasoning
+     model needs room for its `<analysis>` before the `<summary>`. The analysis
+     block is removed before the checkpoint is stored. If the prompt is still
+     too long, earlier messages are truncated and the call is retried up to
+     three times.
+  6. **Fallback checkpoint.** If the summary call fails, hits the context limit
+     after the retries, or returns no text, the engine writes a bounded local
+     checkpoint from the old messages and continues instead of killing the run.
 
 ```yaml
 agent:
@@ -229,10 +230,10 @@ agent:
     auto: true
     context_limit: 299200   # required for self-hosted models
     keep_tokens: 15000
-    buffer: 20000
-    summary_max_tokens: 4096
-    summary_input_tokens: 60000   # per-summary transcript cap (0 = full window)
-    summary_safety_tokens: 8192   # tokenizer/template headroom
+    buffer: 13000                 # ZCode AUTOCOMPACT_BUFFER_TOKENS
+    summary_max_tokens: 20000     # ZCode MAX_OUTPUT_TOKENS_FOR_SUMMARY
+    # summary_input_tokens: 0     # 0 = full window; too-long prompts retry
+    # summary_safety_tokens: 0
     # summary_reasoning_effort: low
     microcompact: true
     microcompact_keep_recent: 5
