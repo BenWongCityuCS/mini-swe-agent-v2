@@ -20,11 +20,12 @@ class CompactionConfig(BaseModel):
     keep_tokens: int = Field(default=15_000, ge=0)
     buffer: int = Field(default=13_000, ge=0)
     """Extra headroom below the output-reserved effective window (ZCode uses 13k)."""
-    summary_max_tokens: int = Field(default=20_000, gt=0)
+    summary_max_tokens: int = Field(default=60_000, gt=0)
     """Maximum output budget for a compaction summary.
 
-    ZCode uses MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000. A reasoning model needs
-    room for its analysis block before the checkpoint; 4k truncates it.
+    ZCode hard-codes 20_000, but reasoning-heavy models can spend much more on
+    the analysis block before writing the checkpoint. This fork defaults to
+    60_000 and exposes the value in the config so it can be tuned per model.
     """
     summary_input_tokens: int = Field(default=0, ge=0)
     """Optional cap on the transcript per summary call. 0 uses the full window.

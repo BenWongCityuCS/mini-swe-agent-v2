@@ -4,4 +4,4 @@ agent:
     auto: true
     keep_tokens: 15000
     buffer: 13000
-    summary_max_tokens: 20000
+    summary_max_tokens: 60000

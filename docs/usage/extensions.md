@@ -197,12 +197,12 @@ into one system prompt:
      agent stops retrying compaction for the run instead of looping.
   4. If the summary prompt itself does not fit a small model's input budget,
      the engine falls back to a minimal template.
-  5. **ZCode's summary budget and retry.** `summary_max_tokens` defaults to
-     **20000**, matching ZCode's `MAX_OUTPUT_TOKENS_FOR_SUMMARY`; a reasoning
-     model needs room for its `<analysis>` before the `<summary>`. The analysis
-     block is removed before the checkpoint is stored. If the prompt is still
-     too long, earlier messages are truncated and the call is retried up to
-     three times.
+  5. **Configurable summary budget and retry.** `summary_max_tokens` defaults
+     to **60000** and is set per model/config: ZCode hard-codes 20000, but
+     reasoning-heavy models can spend much more on the `<analysis>` block before
+     the `<summary>`. The analysis block is removed before the checkpoint is
+     stored. If the prompt is still too long, earlier messages are truncated and
+     the call is retried up to three times.
   6. **Fallback checkpoint.** If the summary call fails, hits the context limit
      after the retries, or returns no text, the engine writes a bounded local
      checkpoint from the old messages and continues instead of killing the run.
@@ -231,7 +231,7 @@ agent:
     context_limit: 299200   # required for self-hosted models
     keep_tokens: 15000
     buffer: 13000                 # ZCode AUTOCOMPACT_BUFFER_TOKENS
-    summary_max_tokens: 20000     # ZCode MAX_OUTPUT_TOKENS_FOR_SUMMARY
+    summary_max_tokens: 60000     # tune per model; reasoning models need more
     # summary_input_tokens: 0     # 0 = full window; too-long prompts retry
     # summary_safety_tokens: 0
     # summary_reasoning_effort: low

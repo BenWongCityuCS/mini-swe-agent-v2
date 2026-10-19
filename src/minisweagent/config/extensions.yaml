@@ -32,7 +32,7 @@ agent:
   #   context_limit: 299200
   #   keep_tokens: 15000
   #   buffer: 13000
-  #   summary_max_tokens: 20000   # ZCode MAX_OUTPUT_TOKENS_FOR_SUMMARY
+  #   summary_max_tokens: 60000   # configurable per model; reasoning models need more
   #   # A too-long compact prompt is retried up to 3 times with earlier
   #   # messages truncated. summary_input_tokens/summary_safety_tokens default
   #   # to 0 (full window); set them only if a provider needs a hard cap.
