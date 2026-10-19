@@ -3489,7 +3489,7 @@ resume semantics.</p>
 <p>The browser tool has two interchangeable backends; the user picks one with
 <code>agent.browser.backend</code>:</p>
 <ul>
-<li><strong><code>webbridge</code></strong> — Kimi WebBridge
+<li><strong><code>webbridge</code></strong> — <a href="https://github.com/BenWongCityuCS/kimi-webbridge-enhanced">Kimi WebBridge</a>
   drives the user's real Chrome/Edge through a local daemon (<code>:10086</code>) and an
   extension, using their cookies and login sessions. Snapshots are an
   accessibility tree with <code>@e</code> refs.</li>
@@ -3550,7 +3550,7 @@ them except <code>find_tab</code>, <code>network</code>, and <code>upload</code>
   is already loaded or a shell command can still reach the network.</li>
 </ul>
 <p>Install the browser-use extra with:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"mini-swe-agent[browser-use] @ git+https://github.com/your-org/mini-swe-agent-v2.git@main"</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"mini-swe-agent[browser-use] @ git+https://github.com/BenWongCityuCS/mini-swe-agent-v2.git@main"</span>
 </code></pre></div>
 <p>browser-use needs Playwright and a Chrome/Chromium installation. If it cannot
 find a browser, set <code>browser_use.executable_path</code> or <code>browser_use.cdp_url</code>.</p>
